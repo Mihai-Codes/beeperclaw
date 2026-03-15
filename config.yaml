@@ -1,14 +1,14 @@
 # codebeep Configuration for Mihai's Setup
-# HTTPS enabled via Tailscale Serve: https://mihais-macbook-pro.taila9246e.ts.net
+# HTTPS via Tailscale Serve (optional; using local host by default)
 
-# Matrix/Beeper connection settings
+# Matrix connection settings
 matrix:
-  # Your Beeper homeserver URL
-  homeserver: "https://matrix.beeper.com"
+  # Your Matrix homeserver URL
+  homeserver: "https://matrix-client.matrix.org"
   
-  # Bot username (create a new Beeper account for the bot)
-  # Format: @username:beeper.local
-  username: "@codebeep-bot:beeper.local"
+  # Bot username (Matrix account)
+  # Format: @username:matrix.org
+  username: "@codebeep_bot:matrix.org"
   
   # Authentication (use ONE of these methods)
   # Option 1: Password (less secure)
@@ -16,27 +16,29 @@ matrix:
   
   # Option 2: Access token (more secure, recommended)
   # To get access token:
-  # 1. Log into Beeper desktop app
-  # 2. Settings → Developers → "+" → Create token
+  # 1. Create a Matrix account for the bot on matrix.org
+  # 2. Exchange username/password for an access token
   # 3. Copy the token here
-  access_token: "YOUR_ACCESS_TOKEN_HERE"
+  access_token: "${BEEPER_ACCESS_TOKEN}"
   
   # Allowed users who can interact with the bot
   allowed_users:
     - "@mihai:beeper.local"
+    - "@mihai:matrix.org"
+    - "@mihai-chindris:beeper.com"
   
   # Device name for the bot
   device_name: "codebeep"
 
 # OpenCode server settings
 opencode:
-  # OpenCode server URL with HTTPS via Tailscale Serve
-  server_url: "https://mihais-macbook-pro.taila9246e.ts.net"
+  # OpenCode server URL (local Docker host)
+  server_url: "http://host.docker.internal:4096"
   
   # Basic Auth credentials for OpenCode
   auth:
-    username: "opencode"
-    password: "Pncdfrwll25121997m@!"
+    username: "${OPENCODE_USERNAME}"
+    password: "${OPENCODE_PASSWORD}"
   
   # Default agent to use (build or plan)
   default_agent: "build"
@@ -99,7 +101,7 @@ bot:
   prefix: "/"
   
   # Send typing indicators while processing
-  typing_indicator: true
+  typing_indicator: false
   
   # Maximum message length before splitting
   max_message_length: 4000

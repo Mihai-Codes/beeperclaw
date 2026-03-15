@@ -29,6 +29,11 @@ matrix:
 opencode:
   # OpenCode server URL (default: localhost)
   server_url: "http://127.0.0.1:4096"
+
+  # Basic Auth credentials for OpenCode
+  auth:
+    username: "${OPENCODE_USERNAME}"
+    password: "${OPENCODE_PASSWORD}"
   
   # Default agent to use (build or plan)
   default_agent: "build"
