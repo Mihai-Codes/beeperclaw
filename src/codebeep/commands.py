@@ -10,7 +10,20 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from codebeep.bot import CodeBeepBot
 
+from codebeep.opencode_client import OpenCodeAPIError, OpenCodeRateLimitError
+
 logger = logging.getLogger(__name__)
+
+
+def format_opencode_error(exc: OpenCodeAPIError) -> str:
+    """Format OpenCode API errors for user-facing messages."""
+    if isinstance(exc, OpenCodeRateLimitError):
+        if exc.retry_after:
+            return f"OpenCode rate limited. Retry after {exc.retry_after:.1f}s."
+        return "OpenCode rate limited. Please retry shortly."
+    if exc.status_code:
+        return f"OpenCode API error (status {exc.status_code})."
+    return f"OpenCode API error: {exc}"
 
 
 @dataclass
@@ -68,12 +81,19 @@ class BuildCommand(Command):
                 session_id=session.id,
                 content=args,
                 agent="build",
+                model=bot.current_model,
             )
 
             return CommandResult(
                 success=True,
                 message=f"Task started with build agent.\nSession: {session.id[:8]}...\n\nI'll notify you when it's complete.",
                 data={"session_id": session.id},
+            )
+        except OpenCodeAPIError as e:
+            logger.exception("Failed to execute build command")
+            return CommandResult(
+                success=False,
+                message=f"Failed to start task: {format_opencode_error(e)}",
             )
         except Exception as e:
             logger.exception("Failed to execute build command")
@@ -105,12 +125,19 @@ class PlanCommand(Command):
                 session_id=session.id,
                 content=args,
                 agent="plan",
+                model=bot.current_model,
             )
 
             return CommandResult(
                 success=True,
                 message=f"Analysis started with plan agent.\nSession: {session.id[:8]}...\n\nI'll notify you when it's complete.",
                 data={"session_id": session.id},
+            )
+        except OpenCodeAPIError as e:
+            logger.exception("Failed to execute plan command")
+            return CommandResult(
+                success=False,
+                message=f"Failed to start analysis: {format_opencode_error(e)}",
             )
         except Exception as e:
             logger.exception("Failed to execute plan command")
@@ -155,6 +182,12 @@ class StatusCommand(Command):
                 success=True,
                 message="\n".join(lines),
             )
+        except OpenCodeAPIError as e:
+            logger.exception("Failed to get status")
+            return CommandResult(
+                success=False,
+                message=f"Failed to get status: {format_opencode_error(e)}",
+            )
         except Exception as e:
             logger.exception("Failed to get status")
             return CommandResult(
@@ -193,6 +226,12 @@ class SessionsCommand(Command):
                 success=True,
                 message="\n".join(lines),
             )
+        except OpenCodeAPIError as e:
+            logger.exception("Failed to list sessions")
+            return CommandResult(
+                success=False,
+                message=f"Failed to list sessions: {format_opencode_error(e)}",
+            )
         except Exception as e:
             logger.exception("Failed to list sessions")
             return CommandResult(
@@ -230,6 +269,12 @@ class AbortCommand(Command):
                 success=True,
                 message=f"Aborted session `{session_id[:8]}...`",
             )
+        except OpenCodeAPIError as e:
+            logger.exception("Failed to abort session")
+            return CommandResult(
+                success=False,
+                message=f"Failed to abort: {format_opencode_error(e)}",
+            )
         except Exception as e:
             logger.exception("Failed to abort session")
             return CommandResult(
@@ -262,7 +307,7 @@ class ModelCommand(Command):
             )
 
         model = args.strip()
-        bot.current_model = model
+        bot.set_current_model(model)
 
         return CommandResult(
             success=True,
@@ -304,7 +349,9 @@ class HelpCommand(Command):
 
         # General help
         lines = ["**codebeep Commands:**\n"]
-        for cmd in bot.commands.values():
+        unique_cmds = {cmd.name: cmd for cmd in bot.commands.values()}
+        for name in sorted(unique_cmds):
+            cmd = unique_cmds[name]
             lines.append(f"• `/{cmd.name}` - {cmd.description}")
 
         lines.append("\n\nUse `/help <command>` for more details.")
@@ -342,6 +389,12 @@ class AgentsCommand(Command):
             return CommandResult(
                 success=True,
                 message="\n".join(lines),
+            )
+        except OpenCodeAPIError as e:
+            logger.exception("Failed to list agents")
+            return CommandResult(
+                success=False,
+                message=f"Failed to list agents: {format_opencode_error(e)}",
             )
         except Exception as e:
             logger.exception("Failed to list agents")

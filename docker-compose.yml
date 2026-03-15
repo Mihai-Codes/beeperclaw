@@ -10,6 +10,7 @@ services:
       - MATRIX_HOMESERVER=https://matrix-client.matrix.org
       - MATRIX_USERNAME=${MATRIX_USERNAME}
       - MATRIX_PASSWORD=${MATRIX_PASSWORD}
+      - BEEPER_ACCESS_TOKEN=${BEEPER_ACCESS_TOKEN}
       - OPENCODE_SERVER_URL=http://host.docker.internal:4096
     volumes:
       - ./config.yaml:/app/config.yaml

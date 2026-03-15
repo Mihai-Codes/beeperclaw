@@ -105,3 +105,10 @@ bot:
   
   # Auto-reply to unknown commands
   unknown_command_reply: true
+
+  # Persisted bot state (session + model)
+  state_path: ".codebeep_store/state.json"
+
+  # Deduplicate incoming events
+  dedup_enabled: true
+  dedup_cache_size: 500

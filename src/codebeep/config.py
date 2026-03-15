@@ -21,10 +21,18 @@ class MatrixConfig(BaseModel):
     device_name: str = "codebeep"
 
 
+class OpenCodeAuthConfig(BaseModel):
+    """OpenCode basic authentication configuration."""
+
+    username: str | None = None
+    password: str | None = None
+
+
 class OpenCodeConfig(BaseModel):
     """OpenCode server configuration."""
 
     server_url: str = "http://127.0.0.1:4096"
+    auth: OpenCodeAuthConfig | None = None
     default_agent: str = "build"
     project_path: str | None = None
     session_timeout: int = 3600
@@ -85,6 +93,9 @@ class BotConfig(BaseModel):
     max_message_length: int = 4000
     rate_limit: int = 30
     unknown_command_reply: bool = True
+    state_path: str = ".codebeep_store/state.json"
+    dedup_enabled: bool = True
+    dedup_cache_size: int = 500
 
 
 class Config(BaseModel):

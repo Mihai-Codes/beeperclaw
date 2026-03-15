@@ -3,15 +3,29 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
-from typing import Any
+import random
+from collections import deque
+from typing import Any, Iterable
 
-from nio import InviteMemberEvent, MegolmEvent, RoomMessageText, Event, RoomPreset
+from nio import InviteMemberEvent, MegolmEvent, RoomMessageText, RoomPreset
+from nio.responses import (
+    RoomCreateError,
+    RoomCreateResponse,
+    RoomInviteError,
+    RoomInviteResponse,
+    RoomPutAliasError,
+    RoomPutAliasResponse,
+    RoomResolveAliasError,
+    RoomResolveAliasResponse,
+)
 import simplematrixbotlib as botlib
 
 from codebeep.commands import ALL_COMMANDS, Command, CommandResult
 from codebeep.config import Config
 from codebeep.opencode_client import OpenCodeClient, Session
+from codebeep.state import BotState, StateStore
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +40,13 @@ class CodeBeepBot:
             config: Bot configuration
         """
         self.config = config
+        auth = None
+        if config.opencode.auth and config.opencode.auth.username and config.opencode.auth.password:
+            auth = (config.opencode.auth.username, config.opencode.auth.password)
+
         self.opencode = OpenCodeClient(
             base_url=config.opencode.server_url,
+            auth=auth,
         )
 
         # Set up Matrix credentials
@@ -36,13 +55,16 @@ class CodeBeepBot:
             username=config.matrix.username,
             password=config.matrix.password,
             access_token=config.matrix.access_token,
+            session_stored_file=None,
+            device_name=config.matrix.device_name,
         )
 
         # Bot configuration
         bot_config = botlib.Config()
-        bot_config.emoji_verify = True
+        bot_config.encryption_enabled = False
+        bot_config.emoji_verify = False
         bot_config.ignore_unverified_devices = True
-        bot_config.store_path = ".codebeep_store"
+        bot_config.store_path = "/app/logs/.codebeep_store"
 
         self.bot = botlib.Bot(self.creds, bot_config)
 
@@ -56,9 +78,56 @@ class CodeBeepBot:
                 self.commands[alias] = cmd
 
         # State
-        self.current_model: str | None = None
+        self.state_store = StateStore(config.bot.state_path)
+        self.state: BotState = self.state_store.load()
+        self.current_model: str | None = self.state.current_model
         self.active_session: Session | None = None
+        self._persisted_session_id: str | None = self.state.active_session_id
         self._event_task: asyncio.Task[None] | None = None
+        self._dedup_enabled = config.bot.dedup_enabled and config.bot.dedup_cache_size > 0
+        self._seen_event_ids: deque[str] = deque(
+            maxlen=config.bot.dedup_cache_size if self._dedup_enabled else None
+        )
+        self._seen_event_ids_set: set[str] = set()
+        if self._dedup_enabled and self.state.seen_event_ids:
+            seed_ids = [e for e in self.state.seen_event_ids if isinstance(e, str) and e]
+            maxlen = self._seen_event_ids.maxlen
+            if maxlen is not None and len(seed_ids) > maxlen:
+                seed_ids = seed_ids[-maxlen:]
+            self._seen_event_ids = deque(seed_ids, maxlen=maxlen)
+            self._seen_event_ids_set = set(seed_ids)
+
+    def _save_state(self) -> None:
+        self.state.active_session_id = self._persisted_session_id
+        self.state.current_model = self.current_model
+        if self._dedup_enabled:
+            self.state.seen_event_ids = list(self._seen_event_ids)
+        self.state_store.save(self.state)
+
+    def _set_active_session(self, session: Session | None) -> None:
+        self.active_session = session
+        self._persisted_session_id = session.id if session else None
+        self._save_state()
+
+    def set_current_model(self, model: str | None) -> None:
+        self.current_model = model
+        self._save_state()
+
+    def _remember_event_id(self, event_id: str) -> None:
+        if event_id in self._seen_event_ids_set:
+            return
+        maxlen = self._seen_event_ids.maxlen
+        if maxlen is not None and len(self._seen_event_ids) >= maxlen:
+            oldest = self._seen_event_ids.popleft()
+            self._seen_event_ids_set.discard(oldest)
+        self._seen_event_ids.append(event_id)
+        self._seen_event_ids_set.add(event_id)
+        if self._dedup_enabled:
+            self._save_state()
+
+    def _get_event_id(self, event: Any) -> str | None:
+        source = getattr(event, "source", None) or {}
+        return getattr(event, "event_id", None) or source.get("event_id")
 
     async def get_or_create_session(self) -> Session:
         """Get the active session or create a new one.
@@ -70,13 +139,23 @@ class CodeBeepBot:
             # Verify session still exists
             try:
                 session = await self.opencode.get_session(self.active_session.id)
+                self._set_active_session(session)
                 return session
             except Exception:
-                self.active_session = None
+                self._set_active_session(None)
+
+        if self._persisted_session_id:
+            try:
+                session = await self.opencode.get_session(self._persisted_session_id)
+                self._set_active_session(session)
+                return session
+            except Exception:
+                self._set_active_session(None)
 
         # Create new session
-        self.active_session = await self.opencode.create_session(title="codebeep mobile session")
-        return self.active_session
+        session = await self.opencode.create_session(title="codebeep mobile session")
+        self._set_active_session(session)
+        return session
 
     def is_user_allowed(self, user_id: str) -> bool:
         """Check if a user is allowed to interact with the bot.
@@ -103,6 +182,13 @@ class CodeBeepBot:
         if not hasattr(event, "sender") or not event.sender:
             logger.info(f"DEBUG: Event has no sender, ignoring")
             return
+
+        event_id = self._get_event_id(event)
+        if self._dedup_enabled and event_id:
+            if event_id in self._seen_event_ids_set:
+                logger.info(f"DEBUG: Duplicate event {event_id}, ignoring")
+                return
+            self._remember_event_id(event_id)
 
         logger.info(f"DEBUG: handle_message called for room {room.room_id} from {event.sender}")
 
@@ -161,11 +247,19 @@ class CodeBeepBot:
                 )
             return
 
-        # Show typing indicator
-        if self.config.bot.typing_indicator:
+        long_running = cmd.name in {"build", "plan"}
+        use_typing = self.config.bot.typing_indicator and long_running
+
+        # Show typing indicator for long-running commands only
+        if use_typing:
             await self.bot.api.async_client.room_typing(room.room_id, True)
 
         try:
+            if long_running:
+                await self.bot.api.send_text_message(
+                    room.room_id,
+                    "Starting task... I'll post updates here.",
+                )
             result = await cmd.execute(self, args)
             await self._send_result(room.room_id, result)
         except Exception as e:
@@ -175,8 +269,170 @@ class CodeBeepBot:
                 f"Error executing command: {e}",
             )
         finally:
-            if self.config.bot.typing_indicator:
+            if use_typing:
                 await self.bot.api.async_client.room_typing(room.room_id, False)
+
+    def _extract_retry_after(self, payload: Any) -> float | None:
+        if isinstance(payload, dict):
+            retry_after_ms = payload.get("retry_after_ms")
+            if isinstance(retry_after_ms, (int, float)) and retry_after_ms > 0:
+                return retry_after_ms / 1000.0
+        return None
+
+    def _parse_transport_payload(self, transport_response: Any) -> dict[str, Any] | None:
+        content = getattr(transport_response, "content", None)
+        if not content:
+            return None
+        try:
+            if isinstance(content, (bytes, bytearray)):
+                content = content.decode("utf-8", errors="ignore")
+            if isinstance(content, str):
+                return json.loads(content)
+        except Exception:
+            return None
+        return None
+
+    def _rate_limited(self, response: Any) -> float | None:
+        errcode = getattr(response, "errcode", None)
+        if errcode == "M_LIMIT_EXCEEDED":
+            retry_after_ms = getattr(response, "retry_after_ms", None)
+            if isinstance(retry_after_ms, (int, float)) and retry_after_ms > 0:
+                return retry_after_ms / 1000.0
+            return -1.0
+
+        transport = getattr(response, "transport_response", None)
+        if transport:
+            status = getattr(transport, "status", None) or getattr(transport, "status_code", None)
+            if status == 429:
+                payload = self._parse_transport_payload(transport)
+                retry_after = self._extract_retry_after(payload)
+                return retry_after if retry_after is not None else -1.0
+
+        message = str(getattr(response, "message", "")).lower()
+        if "m_limit_exceeded" in message or "too many requests" in message:
+            return -1.0
+
+        return None
+
+    async def _retry_matrix_call(
+        self,
+        label: str,
+        func: Any,
+        *args: Any,
+        max_retries: int = 5,
+        base_delay: float = 1.0,
+        **kwargs: Any,
+    ) -> Any:
+        delay = base_delay
+        last_response = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = await func(*args, **kwargs)
+            except Exception as exc:
+                message = str(exc).lower()
+                if (
+                    "m_limit_exceeded" in message
+                    or "too many requests" in message
+                    or "429" in message
+                ):
+                    retry_after = None
+                    sleep_for = delay
+                    jitter = random.uniform(0, 0.5)
+                    logger.warning(
+                        f"{label} rate limited (attempt {attempt}/{max_retries}), retrying in {sleep_for:.2f}s"
+                    )
+                    await asyncio.sleep(sleep_for + jitter)
+                    delay = min(delay * 2, 30.0)
+                    continue
+                raise
+            last_response = response
+            retry_after = self._rate_limited(response)
+            if retry_after is None:
+                return response
+            sleep_for = retry_after if retry_after > 0 else delay
+            jitter = random.uniform(0, 0.5)
+            logger.warning(
+                f"{label} rate limited (attempt {attempt}/{max_retries}), retrying in {sleep_for:.2f}s"
+            )
+            await asyncio.sleep(sleep_for + jitter)
+            delay = min(delay * 2, 30.0)
+
+        logger.error(f"{label} failed after {max_retries} attempts due to rate limiting")
+        return last_response
+
+    async def _resolve_room_alias(self, alias: str) -> str | None:
+        response = await self._retry_matrix_call(
+            "Room alias resolve", self.bot.api.async_client.room_resolve_alias, alias
+        )
+        if isinstance(response, RoomResolveAliasResponse):
+            return response.room_id
+        if isinstance(response, RoomResolveAliasError):
+            return None
+        room_id = getattr(response, "room_id", None)
+        return room_id if isinstance(room_id, str) else None
+
+    async def _bootstrap_shell_room(self) -> None:
+        alias = "#codebeep-shell:matrix.org"
+        existing_room_id = await self._resolve_room_alias(alias)
+        if existing_room_id:
+            logger.info(f"Shell room already exists: {existing_room_id}")
+            return
+
+        logger.info("Bootstrapping: Creating CodeBeep Shell room...")
+        response = await self._retry_matrix_call(
+            "Room create",
+            self.bot.api.async_client.room_create,
+            name="CodeBeep Shell",
+            topic="Unencrypted command shell for CodeBeep",
+            preset=RoomPreset.private_chat,
+        )
+
+        if isinstance(response, RoomCreateError):
+            logger.error(f"Room create failed: {response}")
+            return
+
+        if isinstance(response, RoomCreateResponse):
+            room_id = response.room_id
+        else:
+            room_id = getattr(response, "room_id", None)
+
+        if not room_id:
+            logger.error(f"Room create returned no room_id: {response}")
+            return
+
+        logger.info(f"Created room: {room_id}")
+
+        alias_resp = await self._retry_matrix_call(
+            "Room alias",
+            self.bot.api.async_client.room_put_alias,
+            room_alias=alias,
+            room_id=room_id,
+        )
+
+        if isinstance(alias_resp, RoomPutAliasError):
+            logger.error(f"Failed to set room alias: {alias_resp}")
+        else:
+            logger.info(f"Alias response: {alias_resp}")
+
+        logger.info(f"==================================================")
+        logger.info(f"JOIN LINK: https://matrix.to/#/{alias}")
+        logger.info(f"ROOM ID: {room_id}")
+        logger.info(f"==================================================")
+
+        invitees: Iterable[str] = self.config.matrix.allowed_users or []
+        for user_id in invitees:
+            invite_resp = await self._retry_matrix_call(
+                f"Invite {user_id}",
+                self.bot.api.async_client.room_invite,
+                room_id=room_id,
+                user_id=user_id,
+            )
+            if isinstance(invite_resp, RoomInviteError):
+                logger.error(f"Invite failed for {user_id}: {invite_resp}")
+            elif isinstance(invite_resp, RoomInviteResponse):
+                logger.info(f"Invited {user_id} to room {room_id}")
+            else:
+                logger.info(f"Invite response for {user_id}: {invite_resp}")
 
     async def _send_result(self, room_id: str, result: CommandResult) -> None:
         """Send a command result to a room.
@@ -272,38 +528,7 @@ class CodeBeepBot:
 
         # Bootstrap: Create unencrypted room
         try:
-            logger.info("Bootstrapping: Creating CodeBeep Shell room...")
-            # Create room without encryption
-            resp = await self.bot.api.async_client.room_create(
-                name="CodeBeep Shell",
-                topic="Unencrypted command shell for CodeBeep",
-                preset=RoomPreset.private_chat,
-            )
-            # Log result
-            logger.info(f"Room create response: {resp}")
-            room_id = resp.room_id
-            logger.info(f"Created room: {room_id}")
-
-            # Create room alias for easier joining
-            alias = "#codebeep-shell:matrix.org"
-            logger.info(f"Setting room alias: {alias}")
-            alias_resp = await self.bot.api.async_client.room_put_alias(
-                room_alias=alias, room_id=room_id
-            )
-            logger.info(f"Alias response: {alias_resp}")
-
-            # Log matrix.to link
-            logger.info(f"==================================================")
-            logger.info(f"JOIN LINK: https://matrix.to/#/{alias}")
-            logger.info(f"ROOM ID: {room_id}")
-            logger.info(f"==================================================")
-
-            # Explicitly invite the user
-            logger.info(f"Inviting @mihai-chindris:beeper.com to room {room_id}...")
-            invite_resp = await self.bot.api.async_client.room_invite(
-                room_id=room_id, user_id="@mihai-chindris:beeper.com"
-            )
-            logger.info(f"Invite response: {invite_resp}")
+            await self._bootstrap_shell_room()
         except Exception as e:
             logger.error(f"Bootstrap error: {e}")
 

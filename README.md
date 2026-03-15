@@ -43,8 +43,10 @@ Inspired by [OpenClaw](https://github.com/openclaw/openclaw) - a personal AI ass
 ### Prerequisites
 
 - Python 3.11+
-- [Beeper](https://beeper.com) account
+- Matrix account (either [Beeper](https://beeper.com) or [matrix.org](https://matrix.org))
 - [OpenCode](https://opencode.ai) installed and configured
+
+**Beeper note:** Starting a new Matrix DM from Beeper is supported on Desktop and Android, but is still a work in progress on iOS. If you plan to message a `@bot:matrix.org` account from Beeper, use Desktop or Android for the first DM. See Beeper’s Matrix chat guide for details.
 
 ### Installation
 
@@ -108,7 +110,7 @@ This project includes a LaunchAgent to keep the bot running in the background.
 
 ## Configuration
 
-Edit `config.yaml`:
+Edit `config.yaml` (Beeper account):
 
 ```yaml
 matrix:
@@ -119,6 +121,40 @@ matrix:
 opencode:
   server_url: "http://127.0.0.1:4096"
   default_agent: "build"
+```
+
+Edit `config.yaml` (matrix.org account):
+
+```yaml
+matrix:
+  homeserver: "https://matrix-client.matrix.org"
+  username: "@your-bot:matrix.org"
+  password: "your-password"  # or use access_token
+```
+
+### Matrix.org fallback (no Beeper+ required)
+
+If you can’t create a second Beeper account, you can run the bot on matrix.org and DM it from Beeper Desktop/Android.
+
+1. Create a Matrix account for the bot on matrix.org (Element signup is fine).
+2. Exchange username/password for an access token:
+
+```bash
+curl -s https://matrix-client.matrix.org/_matrix/client/v3/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type":"m.login.password",
+    "user":"@codebeep-bot:matrix.org",
+    "password":"YOUR_BOT_PASSWORD"
+  }'
+```
+
+3. Copy `access_token` into `.env` and restart:
+
+```bash
+BEEPER_ACCESS_TOKEN=PASTE_MATRIX_TOKEN_HERE
+docker compose up -d
+```
 ```
 
 ## Architecture
