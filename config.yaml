@@ -111,3 +111,6 @@ bot:
   
   # Auto-reply to unknown commands
   unknown_command_reply: true
+
+  # Persisted bot state (session + dedup cache)
+  state_path: "/app/logs/.codebeep_store/state.json"
