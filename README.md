@@ -10,11 +10,11 @@ Inspired by [OpenClaw](https://github.com/openclaw/openclaw) - a personal AI ass
 
 ## Recent Updates (February 2026)
 
-- ✅ **Fixed KeyError**: Resolved 'createdAt' parsing issues when communicating with OpenCode API
-- ✅ **Self-Reply Prevention**: Added defensive checks to prevent infinite bot response loops
-- ✅ **Room Bootstrap**: Implemented automatic creation of unencrypted "CodeBeep Shell" room for commands
-- ✅ **Enhanced Logging**: Improved debugging with comprehensive message flow logging
-- ✅ **Error Handling**: Better fallback mechanisms for encrypted room handling
+- **Fixed KeyError**: Resolved 'createdAt' parsing issues when communicating with OpenCode API
+- **Self-Reply Prevention**: Added defensive checks to prevent infinite bot response loops
+- **Room Bootstrap**: Implemented automatic creation of unencrypted "CodeBeep Shell" room for commands
+- **Enhanced Logging**: Improved debugging with comprehensive message flow logging
+- **Error Handling**: Better fallback mechanisms for encrypted room handling
 
 ## Why codebeep?
 
@@ -190,8 +190,8 @@ codebeep Bot (Docker)
 
 ## Current Status
 
-✅ **Working**: Basic commands (/help, /status, /agents), Docker deployment  
-⚠️ **In Progress**: Action commands (/build, /plan) - working but may have occasional errors
+**Working**: Basic commands (/help, /status, /agents), Docker deployment  
+**In Progress**: Action commands (/build, /plan) - working but may have occasional errors
 
 ## Known Issues
 

@@ -69,16 +69,16 @@
 </head>
 <body>
     <div class="container">
-        <h1>🔐 OpenCode Access Portal</h1>
+        <h1>OpenCode Access Portal</h1>
         <p>Your OpenCode server is running! Here are different ways to access it:</p>
         
         <div class="connection-test">
-            <h3>📡 Connection Status</h3>
+            <h3>Connection Status</h3>
             <p id="status">Testing connection...</p>
             <button onclick="testConnection()">Test Again</button>
         </div>
         
-        <h3>🔗 Direct Access Methods</h3>
+        <h3>Direct Access Methods</h3>
         
         <div class="url-box">
             <h4>Method 1: Credentials in URL (Safari)</h4>
@@ -104,10 +104,10 @@
             <button onclick="copyToClipboard('http://100.65.3.121:4096')">Copy URL</button>
         </div>
         
-        <h3>🚀 Quick Launch</h3>
+        <h3>Quick Launch</h3>
         <button onclick="window.open('http://opencode:Pncdfrwll25121997m@!@100.65.3.121:4096', '_blank')">Open OpenCode Now</button>
         
-        <h3>🔧 Troubleshooting</h3>
+        <h3>Troubleshooting</h3>
         <ul>
             <li>If Safari doesn't prompt for credentials, use Method 1 (URL with embedded credentials)</li>
             <li>Ensure Tailscale is running on both devices</li>
@@ -125,14 +125,14 @@
                 // Test with credentials in URL
                 const response = await fetch('http://opencode:Pncdfrwll25121997m@!@100.65.3.121:4096/health');
                 if (response.status === 401) {
-                    statusEl.innerHTML = '<span class="success">✅ Server is reachable but requires authentication</span>';
+                    statusEl.innerHTML = '<span class="success">Server is reachable but requires authentication</span>';
                 } else if (response.ok) {
-                    statusEl.innerHTML = '<span class="success">✅ Server is reachable and authenticated!</span>';
+                    statusEl.innerHTML = '<span class="success">Server is reachable and authenticated.</span>';
                 } else {
-                    statusEl.innerHTML = `<span class="failure">❌ Server responded with status: ${response.status}</span>`;
+                    statusEl.innerHTML = `<span class="failure">Server responded with status: ${response.status}</span>`;
                 }
             } catch (error) {
-                statusEl.innerHTML = `<span class="failure">❌ Cannot connect: ${error.message}</span>`;
+                statusEl.innerHTML = `<span class="failure">Cannot connect: ${error.message}</span>`;
             }
         }
         

@@ -167,14 +167,8 @@ class StatusCommand(Command):
 
             lines = ["**Session Status:**\n"]
             for session_id, status in statuses.items():
-                emoji = {
-                    "idle": "💤",
-                    "running": "🔄",
-                    "waiting": "⏳",
-                }.get(status.status, "❓")
-
                 lines.append(
-                    f"{emoji} `{session_id[:8]}...` - {status.status}"
+                    f"[{status.status}] `{session_id[:8]}...`"
                     + (f" ({status.agent})" if status.agent else "")
                 )
 

@@ -68,7 +68,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>📱 OpenCode Phone Access</h1>
+        <h1>OpenCode Phone Access</h1>
         <p>Choose the method that works best on your phone:</p>
         
         <div class="method">
@@ -94,7 +94,7 @@
         </div>
         
         <div class="note">
-            <strong>📝 Note:</strong> Your phone must be connected to Tailscale. Open the Tailscale app on your phone first to ensure you're connected to the same network.
+            <strong>Note:</strong> Your phone must be connected to Tailscale. Open the Tailscale app on your phone first to ensure you're connected to the same network.
         </div>
         
         <h3>Quick Test:</h3>
@@ -110,14 +110,14 @@
             try {
                 const response = await fetch('http://100.65.3.121:4096/health');
                 if (response.status === 401) {
-                    resultEl.innerHTML = '<span style="color: #28a745;">✅ Server is reachable! Ready for login.</span>';
+                    resultEl.innerHTML = '<span style="color: #28a745;">Server is reachable. Ready for login.</span>';
                 } else if (response.ok) {
-                    resultEl.innerHTML = '<span style="color: #28a745;">✅ Server is reachable and working!</span>';
+                    resultEl.innerHTML = '<span style="color: #28a745;">Server is reachable and working.</span>';
                 } else {
-                    resultEl.innerHTML = `<span style="color: #dc3545;">❌ Server responded: ${response.status}</span>`;
+                    resultEl.innerHTML = `<span style="color: #dc3545;">Server responded: ${response.status}</span>`;
                 }
             } catch (error) {
-                resultEl.innerHTML = `<span style="color: #dc3545;">❌ Cannot connect: ${error.message}</span>`;
+                resultEl.innerHTML = `<span style="color: #dc3545;">Cannot connect: ${error.message}</span>`;
             }
         }
         
