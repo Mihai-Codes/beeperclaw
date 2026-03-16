@@ -127,6 +127,22 @@ class OpenCodeClient:
         except Exception:
             return None
 
+    def _truncate_body(self, response: httpx.Response, limit: int = 500) -> str:
+        try:
+            text = response.text
+        except Exception:
+            return ""
+        return text[:limit] + ("..." if len(text) > limit else "")
+
+    def _expect_json(self, response: httpx.Response, context: str) -> Any:
+        payload = self._safe_json(response)
+        if payload is None:
+            body = self._truncate_body(response)
+            raise OpenCodeInvalidResponseError(
+                f"Expected JSON for {context} response (status {response.status_code}). Body: {body}"
+            )
+        return payload
+
     def _parse_retry_after(self, response: httpx.Response, payload: Any | None) -> float | None:
         header = response.headers.get("Retry-After")
         if header:
@@ -212,8 +228,9 @@ class OpenCodeClient:
                     delay = min(delay * 2, 30.0)
                     continue
 
+                body = self._truncate_body(response)
                 raise OpenCodeAPIError(
-                    f"OpenCode request failed with status {response.status_code}",
+                    f"OpenCode request failed with status {response.status_code}. Body: {body}",
                     status_code=response.status_code,
                     payload=payload,
                     retry_after=retry_after,
@@ -312,7 +329,10 @@ class OpenCodeClient:
             Health status including version
         """
         response = await self._request("GET", "/global/health")
-        return response.json()
+        payload = self._expect_json(response, "health")
+        if not isinstance(payload, dict):
+            raise OpenCodeInvalidResponseError("Expected dict for health response")
+        return payload
 
     async def get_config(self) -> dict[str, Any]:
         """Get server configuration.
@@ -321,7 +341,10 @@ class OpenCodeClient:
             Server configuration
         """
         response = await self._request("GET", "/config")
-        return response.json()
+        payload = self._expect_json(response, "config")
+        if not isinstance(payload, dict):
+            raise OpenCodeInvalidResponseError("Expected dict for config response")
+        return payload
 
     async def list_sessions(self) -> list[Session]:
         """List all sessions.
@@ -330,7 +353,7 @@ class OpenCodeClient:
             List of sessions
         """
         response = await self._request("GET", "/session")
-        data = response.json()
+        data = self._expect_json(response, "list sessions")
         if not isinstance(data, list):
             raise OpenCodeInvalidResponseError("Expected list for sessions response")
         return [self._parse_session(s) for s in data if isinstance(s, dict)]
@@ -342,7 +365,7 @@ class OpenCodeClient:
             Dictionary mapping session ID to status
         """
         response = await self._request("GET", "/session/status")
-        data = response.json()
+        data = self._expect_json(response, "session status")
         if not isinstance(data, dict):
             raise OpenCodeInvalidResponseError("Expected dict for session status response")
         return {
@@ -375,7 +398,7 @@ class OpenCodeClient:
         if parent_id:
             body["parentID"] = parent_id
         response = await self._request("POST", "/session", json_body=body)
-        payload = response.json()
+        payload = self._expect_json(response, "create session")
         if not isinstance(payload, dict):
             raise OpenCodeInvalidResponseError("Expected dict for create session response")
         return self._parse_session(payload)
@@ -390,7 +413,7 @@ class OpenCodeClient:
             Session details
         """
         response = await self._request("GET", f"/session/{session_id}")
-        payload = response.json()
+        payload = self._expect_json(response, "get session")
         if not isinstance(payload, dict):
             raise OpenCodeInvalidResponseError("Expected dict for get session response")
         return self._parse_session(payload)
@@ -405,7 +428,10 @@ class OpenCodeClient:
             True if deleted successfully
         """
         response = await self._request("DELETE", f"/session/{session_id}")
-        return response.json()
+        if response.status_code == 204:
+            return True
+        payload = self._safe_json(response)
+        return bool(payload) if payload is not None else True
 
     async def abort_session(self, session_id: str) -> bool:
         """Abort a running session.
@@ -417,7 +443,10 @@ class OpenCodeClient:
             True if aborted successfully
         """
         response = await self._request("POST", f"/session/{session_id}/abort")
-        return response.json()
+        if response.status_code == 204:
+            return True
+        payload = self._safe_json(response)
+        return bool(payload) if payload is not None else True
 
     async def get_messages(
         self,
@@ -437,7 +466,7 @@ class OpenCodeClient:
         if limit:
             params["limit"] = limit
         response = await self._request("GET", f"/session/{session_id}/message", params=params)
-        data = response.json()
+        data = self._expect_json(response, "get messages")
         if not isinstance(data, list):
             raise OpenCodeInvalidResponseError("Expected list for messages response")
         return [self._parse_message(m) for m in data if isinstance(m, dict)]
@@ -475,7 +504,7 @@ class OpenCodeClient:
             json_body=body,
             timeout=300.0,  # 5 minutes
         )
-        payload = response.json()
+        payload = self._expect_json(response, "send message")
         if not isinstance(payload, dict):
             raise OpenCodeInvalidResponseError("Expected dict for send message response")
         return self._parse_message(payload)
@@ -550,7 +579,7 @@ class OpenCodeClient:
             json_body=body,
             timeout=300.0,
         )
-        payload = response.json()
+        payload = self._expect_json(response, "execute command")
         if not isinstance(payload, dict):
             raise OpenCodeInvalidResponseError("Expected dict for command response")
         return self._parse_message(payload)
@@ -562,7 +591,7 @@ class OpenCodeClient:
             List of agent definitions
         """
         response = await self._request("GET", "/agent")
-        payload = response.json()
+        payload = self._expect_json(response, "list agents")
         if not isinstance(payload, list):
             raise OpenCodeInvalidResponseError("Expected list for agents response")
         return payload
@@ -574,7 +603,7 @@ class OpenCodeClient:
             List of command definitions
         """
         response = await self._request("GET", "/command")
-        payload = response.json()
+        payload = self._expect_json(response, "list commands")
         if not isinstance(payload, list):
             raise OpenCodeInvalidResponseError("Expected list for commands response")
         return payload
@@ -624,7 +653,7 @@ class OpenCodeClient:
         if message_id:
             params["messageID"] = message_id
         response = await self._request("GET", f"/session/{session_id}/diff", params=params)
-        payload = response.json()
+        payload = self._expect_json(response, "get diff")
         if not isinstance(payload, list):
             raise OpenCodeInvalidResponseError("Expected list for diff response")
         return payload
