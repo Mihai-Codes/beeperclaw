@@ -44,6 +44,11 @@ class CodeBeepBot:
         if config.opencode.auth and config.opencode.auth.username and config.opencode.auth.password:
             auth = (config.opencode.auth.username, config.opencode.auth.password)
 
+        if auth:
+            logger.info("OpenCode auth configured for user %s", config.opencode.auth.username)
+        else:
+            logger.warning("OpenCode auth not configured; requests may be unauthorized")
+
         self.opencode = OpenCodeClient(
             base_url=config.opencode.server_url,
             auth=auth,
@@ -96,6 +101,14 @@ class CodeBeepBot:
                 seed_ids = seed_ids[-maxlen:]
             self._seen_event_ids = deque(seed_ids, maxlen=maxlen)
             self._seen_event_ids_set = set(seed_ids)
+
+        if not self.config.bot.state_path:
+            logger.warning("State persistence disabled; session state will reset on restart")
+        else:
+            logger.info(
+                f"Loaded state from {self.config.bot.state_path} (session: {self._persisted_session_id})"
+            )
+            self._save_state()
 
     def _save_state(self) -> None:
         self.state.active_session_id = self._persisted_session_id

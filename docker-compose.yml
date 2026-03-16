@@ -12,6 +12,8 @@ services:
       - MATRIX_PASSWORD=${MATRIX_PASSWORD}
       - BEEPER_ACCESS_TOKEN=${BEEPER_ACCESS_TOKEN}
       - OPENCODE_SERVER_URL=http://host.docker.internal:4096
+      - OPENCODE_USERNAME=${OPENCODE_USERNAME}
+      - OPENCODE_PASSWORD=${OPENCODE_PASSWORD}
     volumes:
       - ./config.yaml:/app/config.yaml
       - ./logs:/app/logs
