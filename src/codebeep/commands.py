@@ -57,6 +57,11 @@ class Command(ABC):
         pass
 
 
+def _format_connect_target(host: str, user: str | None) -> str:
+    user = user.strip() if user else ""
+    return f"{user}@{host}" if user else host
+
+
 class BuildCommand(Command):
     """Execute a coding task with full access."""
 
@@ -309,6 +314,48 @@ class ModelCommand(Command):
         )
 
 
+class SSHCommand(Command):
+    """Show safe SSH and mosh connection strings."""
+
+    name = "ssh"
+    description = "Show configured SSH and mosh connection strings"
+    usage = "/ssh"
+    aliases = ["mosh"]
+
+    async def execute(self, bot: CodeBeepBot, args: str) -> CommandResult:
+        del args
+
+        host = (bot.config.bot.connect_host or "").strip()
+        if not host:
+            return CommandResult(
+                success=True,
+                message=(
+                    "Remote access is not configured.\n\n"
+                    "Set `bot.connect_host` to enable `/ssh` and `/mosh`.\n"
+                    "You can also set `bot.connect_user` and `bot.connect_ssh_port`."
+                ),
+            )
+
+        target = _format_connect_target(host, bot.config.bot.connect_user)
+        ssh_port = bot.config.bot.connect_ssh_port
+
+        ssh_command = f"ssh {target}"
+        mosh_command = f"mosh {target}"
+        if ssh_port != 22:
+            ssh_command = f"ssh -p {ssh_port} {target}"
+            mosh_command = f'mosh --ssh="ssh -p {ssh_port}" {target}'
+
+        return CommandResult(
+            success=True,
+            message=(
+                "**Remote access:**\n"
+                f"SSH: `{ssh_command}`\n"
+                f"Mosh: `{mosh_command}`\n\n"
+                "This command only returns host, user, and port values from config."
+            ),
+        )
+
+
 class HelpCommand(Command):
     """Show help information."""
 
@@ -406,6 +453,7 @@ ALL_COMMANDS: list[type[Command]] = [
     SessionsCommand,
     AbortCommand,
     ModelCommand,
+    SSHCommand,
     HelpCommand,
     AgentsCommand,
 ]

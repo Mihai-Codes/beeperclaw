@@ -97,6 +97,9 @@ class BotConfig(BaseModel):
     dedup_enabled: bool = True
     dedup_cache_size: int = 500
     dedup_window_seconds: int = 10
+    connect_host: str | None = None
+    connect_user: str | None = None
+    connect_ssh_port: int = 22
 
 
 class Config(BaseModel):

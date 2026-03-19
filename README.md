@@ -181,6 +181,7 @@ codebeep Bot (Docker)
 - `/plan <request>` - Analyze code without making changes
 - `/status` - Check current session status
 - `/agents` - List available AI agents
+- `/ssh` - Show configured SSH and mosh connection strings
 - `/sessions` - List all sessions
 - `/help` - Show help information
 

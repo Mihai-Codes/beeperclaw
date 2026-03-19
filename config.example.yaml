@@ -111,6 +111,12 @@ bot:
   # Auto-reply to unknown commands
   unknown_command_reply: true
 
+  # Optional remote access helper for /ssh and /mosh
+  # Leave connect_host empty to keep the command disabled
+  connect_host: ""
+  # connect_user: "mihai"
+  connect_ssh_port: 22
+
   # Persisted bot state (session + dedup cache)
   state_path: "/app/logs/.codebeep_store/state.json"
 
