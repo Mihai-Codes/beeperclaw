@@ -24,7 +24,7 @@ mosh --ssh="ssh -p 2222" mihai@codebeep.tailnet.example
 
 ### iPhone and iPad
 
-- `Moshy`: best fit if you want native `mosh` on iOS.
+- `Moshi`: best fit if you want native `mosh` on iOS.
 - `Termius`: good SSH client for quick access; pair it with `tmux` if you do not need `mosh`.
 
 ### Android
