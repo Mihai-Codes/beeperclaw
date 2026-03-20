@@ -6,8 +6,9 @@ import asyncio
 import json
 import logging
 import random
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any, AsyncIterator
+from typing import Any
 
 import httpx
 
@@ -81,6 +82,15 @@ class SessionStatus:
     status: str  # "idle", "running", "waiting"
     agent: str | None = None
     model: str | None = None
+
+
+@dataclass
+class OpenCodeEvent:
+    """Normalized global event payload."""
+
+    type: str
+    properties: dict[str, Any]
+    raw: dict[str, Any]
 
 
 class OpenCodeClient:
@@ -321,6 +331,76 @@ class OpenCodeClient:
                 or payload.get("parentId")
             ),
         )
+
+    def normalize_event(self, payload: dict[str, Any]) -> OpenCodeEvent:
+        """Normalize documented and legacy event envelopes."""
+        properties = payload.get("properties")
+        if isinstance(properties, dict):
+            event_type = payload.get("type") or properties.get("type") or ""
+            normalized = dict(properties)
+        else:
+            event_type = payload.get("type", "")
+            normalized = {k: v for k, v in payload.items() if k != "type"}
+
+        return OpenCodeEvent(
+            type=str(event_type),
+            properties=normalized,
+            raw=payload,
+        )
+
+    def extract_session_id_from_event(self, event: OpenCodeEvent) -> str | None:
+        """Best-effort session id extraction from an event."""
+        session_id = event.properties.get("sessionID") or event.properties.get("sessionId")
+        if isinstance(session_id, str):
+            return session_id
+
+        message = self.extract_assistant_message_from_event(event, require_assistant=False)
+        if message is not None:
+            return message.session_id
+        return None
+
+    def extract_assistant_message_from_event(
+        self, event: OpenCodeEvent, *, require_assistant: bool = True
+    ) -> Message | None:
+        """Extract a message payload from an event."""
+        candidates: list[dict[str, Any]] = []
+        for source in (event.properties, event.raw):
+            message = source.get("message")
+            if isinstance(message, dict):
+                candidates.append(message)
+            if isinstance(source, dict):
+                candidates.append(source)
+
+        for candidate in candidates:
+            try:
+                message = self._parse_message(candidate)
+            except OpenCodeInvalidResponseError:
+                continue
+            if require_assistant and message.role != "assistant":
+                continue
+            return message
+        return None
+
+    def get_message_text(self, message: Message, max_chars: int = 1500) -> str | None:
+        """Extract readable text from a message's parts."""
+        chunks: list[str] = []
+        for part in message.parts:
+            text = part.get("text")
+            if not isinstance(text, str) or not text.strip():
+                content = part.get("content")
+                if isinstance(content, str) and content.strip():
+                    text = content
+            if not isinstance(text, str) or not text.strip():
+                continue
+            chunks.append(text.strip())
+
+        if not chunks:
+            return None
+
+        result = "\n\n".join(chunks).strip()
+        if len(result) > max_chars:
+            return result[: max_chars - 3].rstrip() + "..."
+        return result
 
     async def health_check(self) -> dict[str, Any]:
         """Check server health.
@@ -608,24 +688,35 @@ class OpenCodeClient:
             raise OpenCodeInvalidResponseError("Expected list for commands response")
         return payload
 
-    async def subscribe_events(self) -> AsyncIterator[dict[str, Any]]:
+    async def subscribe_events(self) -> AsyncIterator[OpenCodeEvent]:
         """Subscribe to server-sent events.
 
         Yields:
-            Event data dictionaries
+            Normalized event payloads
         """
         client = await self._get_client()
         delay = 1.0
+        path = "/global/event"
+        fallback_used = False
         while True:
             try:
-                async with client.stream("GET", "/event") as response:
+                async with client.stream("GET", path) as response:
+                    if response.status_code in {404, 405} and not fallback_used:
+                        logger.info("Falling back to legacy OpenCode event stream path /event")
+                        path = "/event"
+                        fallback_used = True
+                        continue
                     response.raise_for_status()
                     async for line in response.aiter_lines():
                         if line.startswith("data: "):
                             data = line[6:]
                             if data:
                                 try:
-                                    yield json.loads(data)
+                                    payload = json.loads(data)
+                                    if not isinstance(payload, dict):
+                                        logger.warning(f"Unexpected non-dict event payload: {payload}")
+                                        continue
+                                    yield self.normalize_event(payload)
                                 except json.JSONDecodeError:
                                     logger.warning(f"Failed to parse event: {data}")
                 delay = 1.0

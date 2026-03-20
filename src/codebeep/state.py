@@ -16,6 +16,8 @@ class BotState:
 
     active_session_id: str | None = None
     current_model: str | None = None
+    room_sessions: dict[str, str] = field(default_factory=dict)
+    last_notified_assistant_message_by_session: dict[str, str] = field(default_factory=dict)
     seen_event_ids: list[str] = field(default_factory=list)
     shell_room_id: str | None = None
     shell_room_alias: str | None = None
@@ -43,9 +45,29 @@ class StateStore:
                 seen_event_ids = []
             else:
                 seen_event_ids = [e for e in seen_event_ids if isinstance(e, str)]
+            room_sessions = data.get("room_sessions")
+            if not isinstance(room_sessions, dict):
+                room_sessions = {}
+            else:
+                room_sessions = {
+                    room_id: session_id
+                    for room_id, session_id in room_sessions.items()
+                    if isinstance(room_id, str) and isinstance(session_id, str)
+                }
+            last_notified = data.get("last_notified_assistant_message_by_session")
+            if not isinstance(last_notified, dict):
+                last_notified = {}
+            else:
+                last_notified = {
+                    session_id: message_id
+                    for session_id, message_id in last_notified.items()
+                    if isinstance(session_id, str) and isinstance(message_id, str)
+                }
             return BotState(
                 active_session_id=data.get("active_session_id"),
                 current_model=data.get("current_model"),
+                room_sessions=room_sessions,
+                last_notified_assistant_message_by_session=last_notified,
                 seen_event_ids=seen_event_ids,
                 shell_room_id=data.get("shell_room_id"),
                 shell_room_alias=data.get("shell_room_alias"),

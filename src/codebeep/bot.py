@@ -8,8 +8,13 @@ import logging
 import random
 import time
 from collections import deque
-from typing import Any, Iterable
+from collections.abc import Iterable
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
+import markdown
+import simplematrixbotlib as botlib
 from nio import InviteMemberEvent, MegolmEvent, RoomMessageText, RoomPreset
 from nio.responses import (
     RoomCreateError,
@@ -17,18 +22,31 @@ from nio.responses import (
     RoomInviteError,
     RoomInviteResponse,
     RoomPutAliasError,
-    RoomPutAliasResponse,
     RoomResolveAliasError,
     RoomResolveAliasResponse,
 )
-import simplematrixbotlib as botlib
 
-from codebeep.commands import ALL_COMMANDS, Command, CommandResult
+from codebeep.commands import ALL_COMMANDS, Command, CommandContext, CommandResult
 from codebeep.config import Config
 from codebeep.opencode_client import OpenCodeClient, Session
 from codebeep.state import BotState, StateStore
 
 logger = logging.getLogger(__name__)
+
+ACTIVE_SESSION_STATUSES = {"running", "waiting"}
+
+
+@dataclass
+class PendingRun:
+    """An in-flight room-scoped build/plan request."""
+
+    session_id: str
+    room_id: str
+    sender: str
+    command_name: str
+    started_at: float
+    state: str
+    origin_event_id: str | None = None
 
 
 class CodeBeepBot:
@@ -70,7 +88,8 @@ class CodeBeepBot:
         bot_config.encryption_enabled = False
         bot_config.emoji_verify = False
         bot_config.ignore_unverified_devices = True
-        bot_config.store_path = "/app/logs/.codebeep_store"
+        state_dir = Path(config.bot.state_path).expanduser().resolve().parent
+        bot_config.store_path = str(state_dir / "matrix_store")
 
         self.bot = botlib.Bot(self.creds, bot_config)
 
@@ -87,8 +106,11 @@ class CodeBeepBot:
         self.state_store = StateStore(config.bot.state_path)
         self.state: BotState = self.state_store.load()
         self.current_model: str | None = self.state.current_model
-        self.active_session: Session | None = None
-        self._persisted_session_id: str | None = self.state.active_session_id
+        self._room_sessions: dict[str, str] = dict(self.state.room_sessions)
+        self._last_notified_assistant_message_by_session: dict[str, str] = dict(
+            self.state.last_notified_assistant_message_by_session
+        )
+        self._pending_runs: dict[str, PendingRun] = {}
         self._shell_room_id: str | None = self.state.shell_room_id
         self._shell_room_alias: str | None = self.state.shell_room_alias
         self._last_bootstrap_attempt: float | None = self.state.last_bootstrap_attempt
@@ -112,13 +134,19 @@ class CodeBeepBot:
             logger.warning("State persistence disabled; session state will reset on restart")
         else:
             logger.info(
-                f"Loaded state from {self.config.bot.state_path} (session: {self._persisted_session_id})"
+                "Loaded state from %s (%s room mappings)",
+                self.config.bot.state_path,
+                len(self._room_sessions),
             )
             self._save_state()
 
     def _save_state(self) -> None:
-        self.state.active_session_id = self._persisted_session_id
+        self.state.active_session_id = None
         self.state.current_model = self.current_model
+        self.state.room_sessions = dict(self._room_sessions)
+        self.state.last_notified_assistant_message_by_session = dict(
+            self._last_notified_assistant_message_by_session
+        )
         self.state.shell_room_id = self._shell_room_id
         self.state.shell_room_alias = self._shell_room_alias
         self.state.last_bootstrap_attempt = self._last_bootstrap_attempt
@@ -131,11 +159,6 @@ class CodeBeepBot:
         if ":" in username:
             return username.split(":", 1)[1]
         return "matrix.org"
-
-    def _set_active_session(self, session: Session | None) -> None:
-        self.active_session = session
-        self._persisted_session_id = session.id if session else None
-        self._save_state()
 
     def set_current_model(self, model: str | None) -> None:
         self.current_model = model
@@ -175,32 +198,98 @@ class CodeBeepBot:
         self._message_fingerprints.append((now, fingerprint))
         return False
 
-    async def get_or_create_session(self) -> Session:
-        """Get the active session or create a new one.
+    def _get_pending_run_for_room(self, room_id: str) -> PendingRun | None:
+        for pending in self._pending_runs.values():
+            if pending.room_id == room_id:
+                return pending
+        return None
 
-        Returns:
-            Active or new session
-        """
-        if self.active_session is not None:
-            # Verify session still exists
-            try:
-                session = await self.opencode.get_session(self.active_session.id)
-                self._set_active_session(session)
-                return session
-            except Exception:
-                self._set_active_session(None)
+    def register_pending_run(
+        self,
+        *,
+        session_id: str,
+        room_id: str,
+        sender: str,
+        command_name: str,
+        origin_event_id: str | None,
+        state: str,
+    ) -> None:
+        """Track a running room-scoped command."""
+        self._pending_runs[session_id] = PendingRun(
+            session_id=session_id,
+            room_id=room_id,
+            sender=sender,
+            command_name=command_name,
+            origin_event_id=origin_event_id,
+            started_at=time.time(),
+            state=state,
+        )
 
-        if self._persisted_session_id:
-            try:
-                session = await self.opencode.get_session(self._persisted_session_id)
-                self._set_active_session(session)
-                return session
-            except Exception:
-                self._set_active_session(None)
+    def clear_pending_run(self, session_id: str) -> None:
+        """Stop tracking an in-flight command."""
+        self._pending_runs.pop(session_id, None)
 
-        # Create new session
+    async def get_inflight_status_for_room(self, room_id: str) -> tuple[str, str] | None:
+        """Check whether a room already has an active task."""
+        pending = self._get_pending_run_for_room(room_id)
+        if pending is not None:
+            return pending.session_id, pending.state
+
+        session_id = self.get_room_session_id(room_id)
+        if not session_id:
+            return None
+
+        statuses = await self.opencode.get_session_status()
+        status = statuses.get(session_id)
+        if status is not None and status.status in ACTIVE_SESSION_STATUSES:
+            return session_id, status.status
+        return None
+
+    def _room_id_for_session(self, session_id: str) -> str | None:
+        for room_id, mapped_session_id in self._room_sessions.items():
+            if mapped_session_id == session_id:
+                return room_id
+        return None
+
+    def _assistant_message_already_notified(self, session_id: str, message_id: str) -> bool:
+        return self._last_notified_assistant_message_by_session.get(session_id) == message_id
+
+    def _mark_assistant_message_notified(self, session_id: str, message_id: str) -> None:
+        self._last_notified_assistant_message_by_session[session_id] = message_id
+        self._save_state()
+
+    def get_room_session_id(self, room_id: str) -> str | None:
+        """Get the persisted session id for a room, if any."""
+        return self._room_sessions.get(room_id)
+
+    def _set_room_session(self, room_id: str, session: Session | None) -> None:
+        if session is None:
+            self._room_sessions.pop(room_id, None)
+        else:
+            self._room_sessions[room_id] = session.id
+        self._save_state()
+
+    async def get_session_for_room(self, room_id: str) -> Session | None:
+        """Resolve the session currently mapped to a room."""
+        session_id = self.get_room_session_id(room_id)
+        if not session_id:
+            return None
+
+        try:
+            return await self.opencode.get_session(session_id)
+        except Exception:
+            logger.warning("Dropping stale room session mapping for %s -> %s", room_id, session_id)
+            self._set_room_session(room_id, None)
+            return None
+
+    async def get_or_create_session_for_room(self, room_id: str) -> Session:
+        """Get or create the room-scoped session."""
+        session = await self.get_session_for_room(room_id)
+        if session is not None:
+            return session
+
         session = await self.opencode.create_session(title="codebeep mobile session")
-        self._set_active_session(session)
+        self._set_room_session(room_id, session)
         return session
 
     def is_user_allowed(self, user_id: str) -> bool:
@@ -226,7 +315,7 @@ class CodeBeepBot:
         """
         # Defensive checks
         if not hasattr(event, "sender") or not event.sender:
-            logger.info(f"DEBUG: Event has no sender, ignoring")
+            logger.info("DEBUG: Event has no sender, ignoring")
             return
 
         event_id = self._get_event_id(event)
@@ -248,7 +337,7 @@ class CodeBeepBot:
 
         # Check if message has content
         if not body:
-            logger.info(f"DEBUG: Message has no body, ignoring")
+            logger.info("DEBUG: Message has no body, ignoring")
             return
 
         if self._dedup_enabled and not event_id:
@@ -261,13 +350,13 @@ class CodeBeepBot:
         try:
             match = botlib.MessageMatch(room, event, self.bot, self.config.bot.prefix)
             if not match.is_not_from_this_bot():
-                logger.info(f"DEBUG: Message from bot itself, ignoring")
+                logger.info("DEBUG: Message from bot itself, ignoring")
                 return
         except Exception as e:
             logger.warning(f"DEBUG: MessageMatch error: {e}, falling back to manual check")
             # Fallback: manually check if sender is the bot
             if sender == self.config.matrix.username:
-                logger.info(f"DEBUG: Message from bot itself (manual check), ignoring")
+                logger.info("DEBUG: Message from bot itself (manual check), ignoring")
                 return
 
         logger.info(f"DEBUG: Processing message from {sender}: '{body}'")
@@ -301,24 +390,25 @@ class CodeBeepBot:
 
         long_running = cmd.name in {"build", "plan"}
         use_typing = self.config.bot.typing_indicator and long_running
+        context = CommandContext(room_id=room.room_id, sender=sender, event_id=event_id)
 
         # Show typing indicator for long-running commands only
         if use_typing:
             await self.bot.api.async_client.room_typing(room.room_id, True)
 
         try:
-            if long_running:
-                await self.bot.api.send_text_message(
-                    room.room_id,
-                    "Starting task... I'll post updates here.",
-                )
-            result = await cmd.execute(self, args)
-            await self._send_result(room.room_id, result)
+            result = await cmd.execute(self, args, context)
+            await self._send_result(
+                room.room_id,
+                result,
+                reply_to_event_id=context.event_id if long_running else None,
+            )
         except Exception as e:
             logger.exception(f"Error executing command {cmd_name}")
             await self.bot.api.send_text_message(
                 room.room_id,
                 f"Error executing command: {e}",
+                reply_to=context.event_id if long_running and context.event_id else "",
             )
         finally:
             if use_typing:
@@ -492,10 +582,10 @@ class CodeBeepBot:
         else:
             logger.info(f"Alias response: {alias_resp}")
 
-        logger.info(f"==================================================")
+        logger.info("==================================================")
         logger.info(f"JOIN LINK: https://matrix.to/#/{alias}")
         logger.info(f"ROOM ID: {room_id}")
-        logger.info(f"==================================================")
+        logger.info("==================================================")
 
         invitees: Iterable[str] = self.config.matrix.allowed_users or []
         for user_id in invitees:
@@ -512,40 +602,164 @@ class CodeBeepBot:
             else:
                 logger.info(f"Invite response for {user_id}: {invite_resp}")
 
-    async def _send_result(self, room_id: str, result: CommandResult) -> None:
-        """Send a command result to a room.
+    async def _send_markdown_message(
+        self, room_id: str, message: str, *, reply_to_event_id: str | None = None
+    ) -> None:
+        """Send a markdown Matrix message with optional reply metadata."""
+        content = {
+            "msgtype": "m.text",
+            "body": message,
+            "format": "org.matrix.custom.html",
+            "formatted_body": markdown.markdown(message, extensions=["fenced_code", "nl2br"]),
+        }
+        if reply_to_event_id:
+            content["m.relates_to"] = {"m.in_reply_to": {"event_id": reply_to_event_id}}
 
-        Args:
-            room_id: Room ID
-            result: Command result
-        """
+        await self._retry_matrix_call(
+            "Send markdown message",
+            self.bot.api.async_client.room_send,
+            room_id=room_id,
+            message_type="m.room.message",
+            content=content,
+            ignore_unverified_devices=True,
+        )
+
+    async def _send_result(
+        self, room_id: str, result: CommandResult, *, reply_to_event_id: str | None = None
+    ) -> None:
+        """Send a command result to a room."""
         message = result.message
-
-        # Split long messages
         max_len = self.config.bot.max_message_length
-        if len(message) > max_len:
-            parts = [message[i : i + max_len] for i in range(0, len(message), max_len)]
-            for part in parts:
-                await self.bot.api.send_markdown_message(room_id, part)
-        else:
-            await self.bot.api.send_markdown_message(room_id, message)
+        parts = [message[i : i + max_len] for i in range(0, len(message), max_len)]
+        for index, part in enumerate(parts):
+            await self._send_markdown_message(
+                room_id,
+                part,
+                reply_to_event_id=reply_to_event_id if index == 0 else None,
+            )
+
+    async def _recover_pending_runs(self) -> None:
+        """Rebuild pending runs from persisted room mappings after a restart."""
+        if not self._room_sessions:
+            return
+
+        statuses = await self.opencode.get_session_status()
+        now = time.time()
+        for room_id, session_id in self._room_sessions.items():
+            status = statuses.get(session_id)
+            if status is None or status.status not in ACTIVE_SESSION_STATUSES:
+                continue
+            if session_id in self._pending_runs:
+                continue
+            self._pending_runs[session_id] = PendingRun(
+                session_id=session_id,
+                room_id=room_id,
+                sender="",
+                command_name="task",
+                origin_event_id=None,
+                started_at=now,
+                state=status.status,
+            )
+            logger.info(
+                "Recovered pending room task for %s in session %s", room_id, session_id[:8]
+            )
+
+    def _format_completion_message(
+        self, pending: PendingRun, session_id: str, body: str | None, state: str
+    ) -> str:
+        lines = [
+            f"{pending.command_name.capitalize()} finished.",
+            f"Session: `{session_id[:8]}...`",
+            f"State: `{state}`",
+        ]
+        if body:
+            lines.append("")
+            lines.append(body)
+        return "\n".join(lines)
+
+    async def _notify_completion(
+        self,
+        session_id: str,
+        pending: PendingRun,
+        *,
+        body: str | None,
+        state: str,
+        assistant_message_id: str | None = None,
+    ) -> None:
+        await self._send_markdown_message(
+            pending.room_id,
+            self._format_completion_message(pending, session_id, body, state),
+            reply_to_event_id=pending.origin_event_id,
+        )
+        if assistant_message_id:
+            self._mark_assistant_message_notified(session_id, assistant_message_id)
+        self.clear_pending_run(session_id)
+
+    async def _maybe_notify_terminal_session(self, session_id: str) -> None:
+        pending = self._pending_runs.get(session_id)
+        if pending is None:
+            return
+
+        statuses = await self.opencode.get_session_status()
+        status = statuses.get(session_id)
+        if status is not None and status.status in ACTIVE_SESSION_STATUSES:
+            pending.state = status.status
+            return
+
+        try:
+            messages = await self.opencode.get_messages(session_id, limit=20)
+        except Exception:
+            logger.exception("Failed to load messages for session %s", session_id)
+            messages = []
+
+        for message in reversed(messages):
+            if message.role != "assistant":
+                continue
+            if self._assistant_message_already_notified(session_id, message.id):
+                self.clear_pending_run(session_id)
+                return
+            await self._notify_completion(
+                session_id,
+                pending,
+                body=self.opencode.get_message_text(message),
+                state="completed",
+                assistant_message_id=message.id,
+            )
+            return
+
+        await self._notify_completion(
+            session_id,
+            pending,
+            body="Task finished. Inspect the session for the final output.",
+            state=status.status if status is not None else "completed",
+        )
 
     async def _monitor_events(self) -> None:
         """Monitor OpenCode events and notify users of completions."""
         try:
             async for event in self.opencode.subscribe_events():
-                event_type = event.get("type", "")
+                session_id = self.opencode.extract_session_id_from_event(event)
+                if session_id is None or session_id not in self._pending_runs:
+                    continue
 
-                # Handle session completion events
-                if event_type == "session.message":
-                    session_id = event.get("sessionID")
-                    message_data = event.get("message", {})
-                    role = message_data.get("info", {}).get("role")
+                assistant_message = self.opencode.extract_assistant_message_from_event(event)
+                if assistant_message is not None:
+                    if self._assistant_message_already_notified(session_id, assistant_message.id):
+                        self.clear_pending_run(session_id)
+                        continue
+                    pending = self._pending_runs.get(session_id)
+                    if pending is None:
+                        continue
+                    await self._notify_completion(
+                        session_id,
+                        pending,
+                        body=self.opencode.get_message_text(assistant_message),
+                        state="completed",
+                        assistant_message_id=assistant_message.id,
+                    )
+                    continue
 
-                    if role == "assistant":
-                        # Task completed, notify user
-                        # TODO: Track which room to notify
-                        logger.info(f"Session {session_id} completed")
+                await self._maybe_notify_terminal_session(session_id)
 
         except asyncio.CancelledError:
             pass
@@ -600,6 +814,11 @@ class CodeBeepBot:
             )
 
         self.bot.api.async_client.add_event_callback(on_text_debug, RoomMessageText)
+
+        try:
+            await self._recover_pending_runs()
+        except Exception:
+            logger.exception("Failed to recover pending room tasks")
 
         # Start event monitoring
         self._event_task = asyncio.create_task(self._monitor_events())

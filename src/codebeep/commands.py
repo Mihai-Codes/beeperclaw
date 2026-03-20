@@ -35,6 +35,15 @@ class CommandResult:
     data: dict[str, Any] | None = None
 
 
+@dataclass(frozen=True)
+class CommandContext:
+    """Per-command Matrix context."""
+
+    room_id: str
+    sender: str
+    event_id: str | None = None
+
+
 class Command(ABC):
     """Base class for commands."""
 
@@ -44,12 +53,15 @@ class Command(ABC):
     aliases: list[str] = []
 
     @abstractmethod
-    async def execute(self, bot: CodeBeepBot, args: str) -> CommandResult:
+    async def execute(
+        self, bot: CodeBeepBot, args: str, context: CommandContext
+    ) -> CommandResult:
         """Execute the command.
 
         Args:
             bot: The bot instance
             args: Command arguments
+            context: Matrix event context
 
         Returns:
             Command result
@@ -70,7 +82,9 @@ class BuildCommand(Command):
     usage = "/build <task description>"
     aliases = ["b", "do", "code"]
 
-    async def execute(self, bot: CodeBeepBot, args: str) -> CommandResult:
+    async def execute(
+        self, bot: CodeBeepBot, args: str, context: CommandContext
+    ) -> CommandResult:
         if not args.strip():
             return CommandResult(
                 success=False,
@@ -78,20 +92,40 @@ class BuildCommand(Command):
             )
 
         try:
-            # Create or get active session
-            session = await bot.get_or_create_session()
+            busy = await bot.get_inflight_status_for_room(context.room_id)
+            if busy is not None:
+                session_id, status = busy
+                return CommandResult(
+                    success=False,
+                    message=(
+                        f"Room already has a `{status}` task in session `{session_id[:8]}...`.\n"
+                        "Wait for it to finish, use `/abort`, or use another room."
+                    ),
+                )
 
-            # Send message with build agent
+            session = await bot.get_or_create_session_for_room(context.room_id)
+
             await bot.opencode.send_message_async(
                 session_id=session.id,
                 content=args,
                 agent="build",
                 model=bot.current_model,
             )
+            bot.register_pending_run(
+                session_id=session.id,
+                room_id=context.room_id,
+                sender=context.sender,
+                command_name=self.name,
+                origin_event_id=context.event_id,
+                state="running",
+            )
 
             return CommandResult(
                 success=True,
-                message=f"Task started with build agent.\nSession: {session.id[:8]}...\n\nI'll notify you when it's complete.",
+                message=(
+                    f"Task started with build agent.\nSession: `{session.id[:8]}...`\n\n"
+                    "I'll reply here when it's complete."
+                ),
                 data={"session_id": session.id},
             )
         except OpenCodeAPIError as e:
@@ -116,7 +150,9 @@ class PlanCommand(Command):
     usage = "/plan <analysis request>"
     aliases = ["p", "analyze", "review"]
 
-    async def execute(self, bot: CodeBeepBot, args: str) -> CommandResult:
+    async def execute(
+        self, bot: CodeBeepBot, args: str, context: CommandContext
+    ) -> CommandResult:
         if not args.strip():
             return CommandResult(
                 success=False,
@@ -124,7 +160,18 @@ class PlanCommand(Command):
             )
 
         try:
-            session = await bot.get_or_create_session()
+            busy = await bot.get_inflight_status_for_room(context.room_id)
+            if busy is not None:
+                session_id, status = busy
+                return CommandResult(
+                    success=False,
+                    message=(
+                        f"Room already has a `{status}` task in session `{session_id[:8]}...`.\n"
+                        "Wait for it to finish, use `/abort`, or use another room."
+                    ),
+                )
+
+            session = await bot.get_or_create_session_for_room(context.room_id)
 
             await bot.opencode.send_message_async(
                 session_id=session.id,
@@ -132,10 +179,21 @@ class PlanCommand(Command):
                 agent="plan",
                 model=bot.current_model,
             )
+            bot.register_pending_run(
+                session_id=session.id,
+                room_id=context.room_id,
+                sender=context.sender,
+                command_name=self.name,
+                origin_event_id=context.event_id,
+                state="running",
+            )
 
             return CommandResult(
                 success=True,
-                message=f"Analysis started with plan agent.\nSession: {session.id[:8]}...\n\nI'll notify you when it's complete.",
+                message=(
+                    f"Analysis started with plan agent.\nSession: `{session.id[:8]}...`\n\n"
+                    "I'll reply here when it's complete."
+                ),
                 data={"session_id": session.id},
             )
         except OpenCodeAPIError as e:
@@ -160,26 +218,32 @@ class StatusCommand(Command):
     usage = "/status"
     aliases = ["s", "st"]
 
-    async def execute(self, bot: CodeBeepBot, args: str) -> CommandResult:
+    async def execute(
+        self, bot: CodeBeepBot, args: str, context: CommandContext
+    ) -> CommandResult:
         try:
-            statuses = await bot.opencode.get_session_status()
-
-            if not statuses:
+            session_id = args.strip() if args.strip() else bot.get_room_session_id(context.room_id)
+            if not session_id:
                 return CommandResult(
                     success=True,
-                    message="No active sessions.",
+                    message="No active session for this room.",
                 )
 
-            lines = ["**Session Status:**\n"]
-            for session_id, status in statuses.items():
-                lines.append(
-                    f"[{status.status}] `{session_id[:8]}...`"
-                    + (f" ({status.agent})" if status.agent else "")
+            statuses = await bot.opencode.get_session_status()
+            status = statuses.get(session_id)
+            if status is None:
+                return CommandResult(
+                    success=True,
+                    message=f"**Session Status:**\n[idle] `{session_id[:8]}...`",
                 )
+
+            line = f"[{status.status}] `{session_id[:8]}...`"
+            if status.agent:
+                line += f" ({status.agent})"
 
             return CommandResult(
                 success=True,
-                message="\n".join(lines),
+                message=f"**Session Status:**\n{line}",
             )
         except OpenCodeAPIError as e:
             logger.exception("Failed to get status")
@@ -203,7 +267,9 @@ class SessionsCommand(Command):
     usage = "/sessions"
     aliases = ["ls", "list"]
 
-    async def execute(self, bot: CodeBeepBot, args: str) -> CommandResult:
+    async def execute(
+        self, bot: CodeBeepBot, args: str, context: CommandContext
+    ) -> CommandResult:
         try:
             sessions = await bot.opencode.list_sessions()
 
@@ -247,22 +313,28 @@ class AbortCommand(Command):
     usage = "/abort [session_id]"
     aliases = ["stop", "cancel"]
 
-    async def execute(self, bot: CodeBeepBot, args: str) -> CommandResult:
+    async def execute(
+        self, bot: CodeBeepBot, args: str, context: CommandContext
+    ) -> CommandResult:
         try:
-            session_id = args.strip() if args.strip() else None
+            session_id = args.strip() if args.strip() else bot.get_room_session_id(context.room_id)
 
             if session_id is None:
-                # Find running session
-                statuses = await bot.opencode.get_session_status()
-                running = [sid for sid, status in statuses.items() if status.status == "running"]
-                if not running:
-                    return CommandResult(
-                        success=False,
-                        message="No running tasks to abort.",
-                    )
-                session_id = running[0]
+                return CommandResult(
+                    success=False,
+                    message="No active session for this room.",
+                )
+
+            statuses = await bot.opencode.get_session_status()
+            status = statuses.get(session_id)
+            if status is None or status.status not in {"running", "waiting"}:
+                return CommandResult(
+                    success=False,
+                    message=f"Session `{session_id[:8]}...` is not currently running.",
+                )
 
             await bot.opencode.abort_session(session_id)
+            bot.clear_pending_run(session_id)
 
             return CommandResult(
                 success=True,
@@ -290,7 +362,9 @@ class ModelCommand(Command):
     usage = "/model <model_name>"
     aliases = ["m"]
 
-    async def execute(self, bot: CodeBeepBot, args: str) -> CommandResult:
+    async def execute(
+        self, bot: CodeBeepBot, args: str, context: CommandContext
+    ) -> CommandResult:
         if not args.strip():
             # List available models
             return CommandResult(
@@ -364,7 +438,9 @@ class HelpCommand(Command):
     usage = "/help [command]"
     aliases = ["h", "?"]
 
-    async def execute(self, bot: CodeBeepBot, args: str) -> CommandResult:
+    async def execute(
+        self, bot: CodeBeepBot, args: str, context: CommandContext
+    ) -> CommandResult:
         if args.strip():
             # Help for specific command
             cmd_name = args.strip().lower()
@@ -411,7 +487,9 @@ class AgentsCommand(Command):
     usage = "/agents"
     aliases = ["a"]
 
-    async def execute(self, bot: CodeBeepBot, args: str) -> CommandResult:
+    async def execute(
+        self, bot: CodeBeepBot, args: str, context: CommandContext
+    ) -> CommandResult:
         try:
             agents = await bot.opencode.list_agents()
 
