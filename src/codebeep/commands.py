@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from codebeep.bot import CodeBeepBot
 
-from codebeep.opencode_client import OpenCodeAPIError, OpenCodeRateLimitError
+from codebeep.opencode_client import OpenCodeAPIError, OpenCodeRateLimitError, PromptAttachment
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,7 @@ class CommandContext:
     room_id: str
     sender: str
     event_id: str | None = None
+    attachments: tuple[PromptAttachment, ...] = ()
 
 
 class Command(ABC):
@@ -110,6 +111,7 @@ class BuildCommand(Command):
                 content=args,
                 agent="build",
                 model=bot.current_model,
+                attachments=list(context.attachments),
             )
             bot.register_pending_run(
                 session_id=session.id,
@@ -118,12 +120,18 @@ class BuildCommand(Command):
                 command_name=self.name,
                 origin_event_id=context.event_id,
                 state="running",
+                attachments=context.attachments,
             )
+
+            attachment_note = ""
+            if context.attachments:
+                attachment_note = f"Attachments: `{len(context.attachments)}`\n"
 
             return CommandResult(
                 success=True,
                 message=(
                     f"Task started with build agent.\nSession: `{session.id[:8]}...`\n\n"
+                    f"{attachment_note}"
                     "I'll reply here when it's complete."
                 ),
                 data={"session_id": session.id},
@@ -178,6 +186,7 @@ class PlanCommand(Command):
                 content=args,
                 agent="plan",
                 model=bot.current_model,
+                attachments=list(context.attachments),
             )
             bot.register_pending_run(
                 session_id=session.id,
@@ -186,12 +195,18 @@ class PlanCommand(Command):
                 command_name=self.name,
                 origin_event_id=context.event_id,
                 state="running",
+                attachments=context.attachments,
             )
+
+            attachment_note = ""
+            if context.attachments:
+                attachment_note = f"Attachments: `{len(context.attachments)}`\n"
 
             return CommandResult(
                 success=True,
                 message=(
                     f"Analysis started with plan agent.\nSession: `{session.id[:8]}...`\n\n"
+                    f"{attachment_note}"
                     "I'll reply here when it's complete."
                 ),
                 data={"session_id": session.id},

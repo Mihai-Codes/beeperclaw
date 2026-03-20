@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from nio.responses import DiskDownloadResponse, DownloadError
 
 import codebeep.bot as bot_module
 from codebeep.bot import CodeBeepBot
@@ -24,6 +27,7 @@ class _SentMessage:
 class _DummyAsyncClient:
     def __init__(self) -> None:
         self.sent_messages: list[_SentMessage] = []
+        self.download = AsyncMock(side_effect=self._download_impl)
 
     async def room_send(self, *, room_id: str, message_type: str, content: dict, **kwargs):
         self.sent_messages.append(
@@ -33,6 +37,15 @@ class _DummyAsyncClient:
 
     async def room_typing(self, room_id: str, typing_state: bool):
         return object()
+
+    async def _download_impl(self, *, mxc: str, save_to=None, **kwargs):
+        del mxc, kwargs
+        if save_to is None:
+            raise AssertionError("download test double expected save_to")
+        path = Path(save_to)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"attachment")
+        return DiskDownloadResponse(body=path, content_type="image/png", filename=path.name)
 
     def add_event_callback(self, callback, event_type) -> None:
         return None
@@ -111,6 +124,43 @@ def _assistant_event(bot: CodeBeepBot, *, session_id: str = "sess-1", message_id
                 },
             },
         }
+    )
+
+
+def _room(room_id: str = "!room:example.org") -> SimpleNamespace:
+    return SimpleNamespace(room_id=room_id)
+
+
+def _text_event(body: str, *, event_id: str = "$text") -> SimpleNamespace:
+    return SimpleNamespace(
+        sender="@mihai:matrix.org",
+        body=body,
+        event_id=event_id,
+        source={"event_id": event_id, "content": {"body": body}},
+    )
+
+
+def _attachment_event(
+    *,
+    body: str,
+    filename: str,
+    mimetype: str = "image/png",
+    event_id: str = "$attachment",
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        sender="@mihai:matrix.org",
+        body=body,
+        url="mxc://matrix.example.org/media",
+        event_id=event_id,
+        source={
+            "event_id": event_id,
+            "content": {
+                "body": body,
+                "filename": filename,
+                "url": "mxc://matrix.example.org/media",
+                "info": {"mimetype": mimetype},
+            },
+        },
     )
 
 
@@ -283,3 +333,65 @@ async def test_restart_recovers_pending_run_and_persists_notification_dedup(
     await dedup_bot._monitor_events()
 
     assert dedup_bot.bot.api.async_client.sent_messages == []
+
+
+@pytest.mark.asyncio
+async def test_attachment_is_staged_for_next_long_running_command(bot_factory) -> None:
+    bot = bot_factory()
+    bot.get_inflight_status_for_room = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    bot.get_or_create_session_for_room = AsyncMock(return_value=_session("sess-1"))  # type: ignore[method-assign]
+    bot.opencode.send_message_async = AsyncMock()
+
+    await bot.handle_media_message(_room(), _attachment_event(body="error.png", filename="error.png"))
+
+    assert len(bot._staged_attachments_for_room("!room:example.org")) == 1
+    assert "Saved attachment" in bot.bot.api.async_client.sent_messages[-1].content["body"]
+
+    await bot.handle_message(_room(), _text_event("/build investigate this"))
+
+    bot.opencode.send_message_async.assert_awaited_once()
+    send_kwargs = bot.opencode.send_message_async.await_args.kwargs
+    assert len(send_kwargs["attachments"]) == 1
+    assert bot._staged_attachments_for_room("!room:example.org") == ()
+
+    pending = bot._pending_runs["sess-1"]
+    attachment_path = Path(pending.attachments[0].path)
+    assert attachment_path.exists()
+
+    bot.clear_pending_run("sess-1")
+    assert not attachment_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_attachment_caption_can_start_plan_immediately(bot_factory) -> None:
+    bot = bot_factory()
+    bot.get_inflight_status_for_room = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    bot.get_or_create_session_for_room = AsyncMock(return_value=_session("sess-2"))  # type: ignore[method-assign]
+    bot.opencode.send_message_async = AsyncMock()
+
+    await bot.handle_media_message(
+        _room(),
+        _attachment_event(
+            body="/plan inspect this screenshot",
+            filename="screenshot.png",
+            event_id="$img2",
+        ),
+    )
+
+    bot.opencode.send_message_async.assert_awaited_once()
+    sent_messages = bot.bot.api.async_client.sent_messages
+    assert any("Analysis started with plan agent." in message.content["body"] for message in sent_messages)
+    assert bot._staged_attachments_for_room("!room:example.org") == ()
+
+
+@pytest.mark.asyncio
+async def test_attachment_download_failure_returns_helpful_reply(bot_factory) -> None:
+    bot = bot_factory()
+    bot.bot.api.async_client.download = AsyncMock(return_value=DownloadError("boom"))  # type: ignore[method-assign]
+
+    await bot.handle_media_message(_room(), _attachment_event(body="error.log", filename="error.log"))
+
+    sent_messages = bot.bot.api.async_client.sent_messages
+    assert len(sent_messages) == 1
+    assert "Couldn't use that attachment" in sent_messages[0].content["body"]
+    assert bot._staged_attachments_for_room("!room:example.org") == ()

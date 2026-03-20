@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import mimetypes
 import random
+import re
 import time
 from collections import deque
 from collections.abc import Iterable
@@ -15,8 +17,25 @@ from typing import Any
 
 import markdown  # type: ignore[import-untyped]
 import simplematrixbotlib as botlib
-from nio import InviteMemberEvent, MegolmEvent, RoomMessageText, RoomPreset  # type: ignore[import-untyped]
+from nio import (  # type: ignore[import-untyped]
+    InviteMemberEvent,
+    MegolmEvent,
+    RoomEncryptedAudio,
+    RoomEncryptedFile,
+    RoomEncryptedImage,
+    RoomEncryptedVideo,
+    RoomMessageAudio,
+    RoomMessageFile,
+    RoomMessageImage,
+    RoomMessageText,
+    RoomMessageVideo,
+    RoomPreset,
+)
+from nio.crypto.attachments import decrypt_attachment  # type: ignore[import-untyped]
 from nio.responses import (  # type: ignore[import-untyped]
+    DiskDownloadResponse,
+    DownloadError,
+    MemoryDownloadResponse,
     RoomCreateError,
     RoomCreateResponse,
     RoomInviteError,
@@ -28,7 +47,7 @@ from nio.responses import (  # type: ignore[import-untyped]
 
 from codebeep.commands import ALL_COMMANDS, Command, CommandContext, CommandResult
 from codebeep.config import Config
-from codebeep.opencode_client import OpenCodeClient, Session
+from codebeep.opencode_client import OpenCodeClient, PromptAttachment, Session
 from codebeep.state import BotState, StateStore
 
 logger = logging.getLogger(__name__)
@@ -47,6 +66,7 @@ class PendingRun:
     started_at: float
     state: str
     origin_event_id: str | None = None
+    attachments: tuple[PromptAttachment, ...] = ()
 
 
 class CodeBeepBot:
@@ -91,6 +111,8 @@ class CodeBeepBot:
         bot_config.ignore_unverified_devices = True
         state_dir = Path(config.bot.state_path).expanduser().resolve().parent
         bot_config.store_path = str(state_dir / "matrix_store")
+        self._attachment_dir = state_dir / "attachments"
+        self._attachment_dir.mkdir(parents=True, exist_ok=True)
 
         self.bot = botlib.Bot(self.creds, bot_config)
 
@@ -111,6 +133,7 @@ class CodeBeepBot:
         self._last_notified_assistant_message_by_session: dict[str, str] = dict(
             self.state.last_notified_assistant_message_by_session
         )
+        self._staged_attachments_by_room: dict[str, list[PromptAttachment]] = {}
         self._pending_runs: dict[str, PendingRun] = {}
         self._shell_room_id: str | None = self.state.shell_room_id
         self._shell_room_alias: str | None = self.state.shell_room_alias
@@ -214,8 +237,10 @@ class CodeBeepBot:
         command_name: str,
         origin_event_id: str | None,
         state: str,
+        attachments: tuple[PromptAttachment, ...] = (),
     ) -> None:
         """Track a running room-scoped command."""
+        self._remove_staged_attachments(room_id, attachments)
         self._pending_runs[session_id] = PendingRun(
             session_id=session_id,
             room_id=room_id,
@@ -224,11 +249,67 @@ class CodeBeepBot:
             origin_event_id=origin_event_id,
             started_at=time.time(),
             state=state,
+            attachments=attachments,
         )
 
     def clear_pending_run(self, session_id: str) -> None:
         """Stop tracking an in-flight command."""
-        self._pending_runs.pop(session_id, None)
+        pending = self._pending_runs.pop(session_id, None)
+        if pending is not None:
+            self._cleanup_attachments(pending.attachments)
+
+    def _cleanup_attachments(self, attachments: Iterable[PromptAttachment]) -> None:
+        for attachment in attachments:
+            try:
+                Path(attachment.path).unlink(missing_ok=True)
+            except Exception:
+                logger.warning("Failed to clean up attachment %s", attachment.path)
+
+    def _expire_staged_attachments(self, room_id: str | None = None) -> None:
+        ttl_seconds = max(300, self.config.opencode.session_timeout)
+        cutoff = time.time() - ttl_seconds
+        room_ids = [room_id] if room_id is not None else list(self._staged_attachments_by_room)
+
+        for current_room_id in room_ids:
+            staged = self._staged_attachments_by_room.get(current_room_id)
+            if not staged:
+                continue
+            keep: list[PromptAttachment] = []
+            expired: list[PromptAttachment] = []
+            for attachment in staged:
+                if attachment.created_at and attachment.created_at < cutoff:
+                    expired.append(attachment)
+                else:
+                    keep.append(attachment)
+
+            if expired:
+                self._cleanup_attachments(expired)
+            if keep:
+                self._staged_attachments_by_room[current_room_id] = keep
+            else:
+                self._staged_attachments_by_room.pop(current_room_id, None)
+
+    def _staged_attachments_for_room(self, room_id: str) -> tuple[PromptAttachment, ...]:
+        self._expire_staged_attachments(room_id)
+        return tuple(self._staged_attachments_by_room.get(room_id, []))
+
+    def _stage_attachment(self, room_id: str, attachment: PromptAttachment) -> None:
+        self._expire_staged_attachments(room_id)
+        self._staged_attachments_by_room.setdefault(room_id, []).append(attachment)
+
+    def _remove_staged_attachments(
+        self, room_id: str, attachments: Iterable[PromptAttachment]
+    ) -> None:
+        staged = self._staged_attachments_by_room.get(room_id)
+        if not staged:
+            return
+
+        attachment_paths = {attachment.path for attachment in attachments}
+        remaining = [attachment for attachment in staged if attachment.path not in attachment_paths]
+        if remaining:
+            self._staged_attachments_by_room[room_id] = remaining
+        else:
+            self._staged_attachments_by_room.pop(room_id, None)
 
     async def get_inflight_status_for_room(self, room_id: str) -> tuple[str, str] | None:
         """Check whether a room already has an active task."""
@@ -372,14 +453,35 @@ class CodeBeepBot:
             return
 
         # Parse command
+        parsed = self._parse_command(body)
+        if parsed is None:
+            return
+        cmd_name, args = parsed
+        await self._execute_command(
+            room=room,
+            sender=sender,
+            event_id=event_id,
+            cmd_name=cmd_name,
+            args=args,
+        )
+
+    def _parse_command(self, body: str) -> tuple[str, str] | None:
         parts = body[len(self.config.bot.prefix) :].split(maxsplit=1)
         if not parts:
-            return
-
+            return None
         cmd_name = parts[0].lower()
         args = parts[1] if len(parts) > 1 else ""
+        return cmd_name, args
 
-        # Find and execute command
+    async def _execute_command(
+        self,
+        *,
+        room: Any,
+        sender: str,
+        event_id: str | None,
+        cmd_name: str,
+        args: str,
+    ) -> None:
         cmd = self.commands.get(cmd_name)
         if cmd is None:
             if self.config.bot.unknown_command_reply:
@@ -390,10 +492,15 @@ class CodeBeepBot:
             return
 
         long_running = cmd.name in {"build", "plan"}
+        attachments = self._staged_attachments_for_room(room.room_id) if long_running else ()
         use_typing = self.config.bot.typing_indicator and long_running
-        context = CommandContext(room_id=room.room_id, sender=sender, event_id=event_id)
+        context = CommandContext(
+            room_id=room.room_id,
+            sender=sender,
+            event_id=event_id,
+            attachments=attachments,
+        )
 
-        # Show typing indicator for long-running commands only
         if use_typing:
             await self.bot.api.async_client.room_typing(room.room_id, True)
 
@@ -414,6 +521,171 @@ class CodeBeepBot:
         finally:
             if use_typing:
                 await self.bot.api.async_client.room_typing(room.room_id, False)
+
+    def _attachment_caption(self, event: Any) -> str | None:
+        content = getattr(event, "source", {}).get("content", {})
+        body = getattr(event, "body", None) or content.get("body")
+        filename = content.get("filename")
+        if not isinstance(body, str):
+            return None
+        body = body.strip()
+        if not body:
+            return None
+        if isinstance(filename, str) and filename.strip() and body == filename.strip():
+            return None
+        return body
+
+    def _attachment_filename(self, event: Any, response_filename: str | None = None) -> str:
+        content = getattr(event, "source", {}).get("content", {})
+        candidate = content.get("filename") or response_filename or getattr(event, "body", None)
+        if not isinstance(candidate, str) or not candidate.strip():
+            candidate = "attachment"
+        candidate = Path(candidate).name
+        sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", candidate).strip("._")
+        return sanitized or "attachment"
+
+    def _attachment_mime(self, event: Any) -> str:
+        content = getattr(event, "source", {}).get("content", {})
+        info = content.get("info", {})
+        if isinstance(info, dict):
+            mimetype = info.get("mimetype")
+            if isinstance(mimetype, str) and mimetype.strip():
+                return mimetype
+        mimetype = getattr(event, "mimetype", None)
+        if isinstance(mimetype, str) and mimetype.strip():
+            return mimetype
+        return "application/octet-stream"
+
+    def _attachment_destination(self, event_id: str | None, filename: str, mime: str) -> Path:
+        safe_name = self._attachment_filename(type("Attachment", (), {"source": {"content": {"filename": filename}}})())
+        if "." not in safe_name:
+            extension = mimetypes.guess_extension(mime) or ""
+            safe_name = f"{safe_name}{extension}"
+        prefix = re.sub(r"[^A-Za-z0-9._-]+", "_", (event_id or f"attachment-{int(time.time())}"))
+        return self._attachment_dir / f"{prefix}-{safe_name}"
+
+    async def _download_attachment(self, event: Any) -> PromptAttachment:
+        event_id = self._get_event_id(event)
+        url = getattr(event, "url", None)
+        if not isinstance(url, str) or not url:
+            raise ValueError("Attachment is missing a Matrix media URL.")
+
+        mime = self._attachment_mime(event)
+        destination = self._attachment_destination(event_id, self._attachment_filename(event), mime)
+        caption = self._attachment_caption(event)
+
+        if hasattr(event, "key") and hasattr(event, "hashes") and hasattr(event, "iv"):
+            response = await self.bot.api.async_client.download(mxc=url)
+            if isinstance(response, DownloadError):
+                raise ValueError(f"Attachment download failed: {response.message}")
+            ciphertext = response.body if isinstance(response.body, (bytes, bytearray)) else None
+            if ciphertext is None:
+                raise ValueError("Encrypted attachment download returned no bytes.")
+            key = getattr(event, "key", {}).get("k")
+            sha256 = getattr(event, "hashes", {}).get("sha256")
+            iv = getattr(event, "iv", None)
+            if not all(isinstance(value, str) and value for value in (key, sha256, iv)):
+                raise ValueError("Encrypted attachment metadata is incomplete.")
+            plaintext = decrypt_attachment(bytes(ciphertext), key, sha256, iv)
+            destination.write_bytes(plaintext)
+            return PromptAttachment(
+                path=str(destination.resolve()),
+                mime=mime,
+                filename=destination.name,
+                caption=caption,
+            )
+
+        response = await self.bot.api.async_client.download(mxc=url, save_to=destination)
+        if isinstance(response, DownloadError):
+            raise ValueError(f"Attachment download failed: {response.message}")
+        if isinstance(response, MemoryDownloadResponse):
+            if not isinstance(response.body, (bytes, bytearray)):
+                raise ValueError("Attachment download returned invalid in-memory data.")
+            destination.write_bytes(bytes(response.body))
+        elif isinstance(response, DiskDownloadResponse):
+            downloaded_path = Path(response.body)
+            if downloaded_path != destination and downloaded_path.exists():
+                downloaded_path.replace(destination)
+
+        filename = self._attachment_filename(event, getattr(response, "filename", None))
+        if destination.name != filename and filename:
+            normalized = destination.with_name(self._attachment_destination(event_id, filename, mime).name)
+            destination.replace(normalized)
+            destination = normalized
+
+        return PromptAttachment(
+            path=str(destination.resolve()),
+            mime=mime,
+            filename=filename,
+            caption=caption,
+            created_at=time.time(),
+        )
+
+    async def handle_media_message(self, room: Any, event: Any) -> None:
+        """Handle Matrix file/image/audio/video messages."""
+        sender = getattr(event, "sender", None)
+        if not isinstance(sender, str) or not sender:
+            return
+
+        event_id = self._get_event_id(event)
+        if self._dedup_enabled and event_id:
+            if event_id in self._seen_event_ids_set:
+                return
+            self._remember_event_id(event_id)
+
+        if sender == self.config.matrix.username:
+            return
+        if not self.is_user_allowed(sender):
+            logger.warning("Unauthorized user attempted to upload attachment: %s", sender)
+            return
+
+        try:
+            attachment = await self._download_attachment(event)
+        except ValueError as exc:
+            await self._send_markdown_message(
+                room.room_id,
+                f"Couldn't use that attachment: {exc}",
+                reply_to_event_id=event_id,
+            )
+            return
+        except Exception:
+            logger.exception("Failed to process attachment event")
+            await self._send_markdown_message(
+                room.room_id,
+                "Couldn't use that attachment due to an unexpected download error.",
+                reply_to_event_id=event_id,
+            )
+            return
+
+        self._stage_attachment(room.room_id, attachment)
+        caption = attachment.caption or ""
+        if caption.startswith(self.config.bot.prefix):
+            parsed = self._parse_command(caption)
+            if parsed is not None:
+                cmd_name, args = parsed
+                cmd = self.commands.get(cmd_name)
+                if cmd is not None and cmd.name in {"build", "plan"}:
+                    await self._execute_command(
+                        room=room,
+                        sender=sender,
+                        event_id=event_id,
+                        cmd_name=cmd_name,
+                        args=args,
+                    )
+                    return
+
+            await self._send_markdown_message(
+                room.room_id,
+                "Attachment saved. Use `/build` or `/plan` to consume staged files in this room.",
+                reply_to_event_id=event_id,
+            )
+            return
+
+        await self._send_markdown_message(
+            room.room_id,
+            f"Saved attachment `{attachment.filename}` for the next `/build` or `/plan` in this room.",
+            reply_to_event_id=event_id,
+        )
 
     def _extract_retry_after(self, payload: Any) -> float | None:
         if isinstance(payload, dict):
@@ -789,6 +1061,22 @@ class CodeBeepBot:
             await self.handle_message(room, event)
 
         self.bot.api.async_client.add_event_callback(on_message, RoomMessageText)
+
+        async def on_media(room: Any, event: Any) -> None:
+            await self.handle_media_message(room, event)
+
+        media_event_types = (
+            RoomMessageImage,
+            RoomMessageFile,
+            RoomMessageVideo,
+            RoomMessageAudio,
+            RoomEncryptedImage,
+            RoomEncryptedFile,
+            RoomEncryptedVideo,
+            RoomEncryptedAudio,
+        )
+        for event_type in media_event_types:
+            self.bot.api.async_client.add_event_callback(on_media, event_type)
 
         # Register invite handler
         async def on_invite(room: Any, event: Any) -> None:

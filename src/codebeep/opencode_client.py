@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import mimetypes
 import random
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -72,6 +74,17 @@ class Message:
     agent: str | None = None
     model: dict[str, str] | None = None
     parent_id: str | None = None
+
+
+@dataclass
+class PromptAttachment:
+    """A local file staged for prompt context."""
+
+    path: str
+    mime: str
+    filename: str
+    caption: str | None = None
+    created_at: float = 0.0
 
 
 @dataclass
@@ -595,6 +608,7 @@ class OpenCodeClient:
         content: str,
         agent: str | None = None,
         model: str | None = None,
+        attachments: list[PromptAttachment] | None = None,
     ) -> None:
         """Send a message asynchronously (don't wait for response).
 
@@ -604,9 +618,36 @@ class OpenCodeClient:
             agent: Agent to use
             model: Model to use
         """
-        body: dict[str, Any] = {
-            "parts": [{"type": "text", "text": content}],
-        }
+        prompt_text = content.strip()
+        parts: list[dict[str, Any]] = []
+
+        if attachments:
+            attachment_lines = ["Attachment context:"]
+            for attachment in attachments:
+                path = str(Path(attachment.path).expanduser().resolve())
+                mime = attachment.mime or mimetypes.guess_type(path)[0] or "application/octet-stream"
+                parts.append(
+                    {
+                        "type": "file",
+                        "mime": mime,
+                        "filename": attachment.filename,
+                        "url": Path(path).as_uri(),
+                    }
+                )
+                summary = f"- {attachment.filename} ({mime}) at {path}"
+                if attachment.caption:
+                    summary += f" | note: {attachment.caption}"
+                attachment_lines.append(summary)
+            prompt_text = (
+                f"{prompt_text}\n\n" + "\n".join(attachment_lines)
+                if prompt_text
+                else "\n".join(attachment_lines)
+            )
+
+        if prompt_text:
+            parts.insert(0, {"type": "text", "text": prompt_text})
+
+        body: dict[str, Any] = {"parts": parts}
         if agent:
             body["agent"] = agent
         if model:

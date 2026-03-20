@@ -24,6 +24,7 @@ Inspired by [OpenClaw](https://github.com/openclaw/openclaw) - a personal AI ass
 ## Features
 
 - **Mobile-first**: Assign coding tasks from your phone via Beeper/Matrix
+- **Attachment Context**: Send screenshots or files from Beeper and use them in `/build` or `/plan`
 - **OpenCode Integration**: Full access to OpenCode's build and plan agents
 - **Self-hosted**: Your code, your data, your control
 - **Unencrypted Shell Room**: Dedicated room for reliable command execution
@@ -186,6 +187,8 @@ codebeep Bot (Docker)
 - `/ssh` - Show configured SSH and mosh connection strings
 - `/sessions` - List all sessions
 - `/help` - Show help information
+
+You can also upload an image or file before `/build` or `/plan`, or caption the upload with `/build ...` or `/plan ...` to run immediately with that attachment as context.
 
 ## Current Status
 

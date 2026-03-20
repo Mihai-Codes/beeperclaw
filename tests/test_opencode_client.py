@@ -9,7 +9,12 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-from codebeep.opencode_client import Message, OpenCodeClient, OpenCodeInvalidResponseError
+from codebeep.opencode_client import (
+    Message,
+    OpenCodeClient,
+    OpenCodeInvalidResponseError,
+    PromptAttachment,
+)
 
 
 @pytest.fixture
@@ -189,3 +194,39 @@ class TestOpenCodeClient:
 
         with pytest.raises(OpenCodeInvalidResponseError):
             await client.list_sessions()
+
+    @pytest.mark.asyncio
+    async def test_send_message_async_includes_attachment_context(
+        self, client: OpenCodeClient, tmp_path
+    ) -> None:
+        request = httpx.Request("POST", "http://127.0.0.1:4096/session/sess-1/message")
+        fake_client = _RetryingHttpClient(
+            [
+                httpx.Response(200, request=request, json={}),
+            ]
+        )
+        client._get_client = AsyncMock(return_value=fake_client)  # type: ignore[attr-defined]
+        attachment_path = tmp_path / "error.png"
+        attachment = PromptAttachment(
+            path=str(attachment_path),
+            mime="image/png",
+            filename="error.png",
+            caption="Screenshot of the failure",
+        )
+
+        await client.send_message_async(
+            session_id="sess-1",
+            content="Investigate this",
+            agent="plan",
+            attachments=[attachment],
+        )
+
+        body = fake_client.requests[0]["json"]
+        assert isinstance(body, dict)
+        parts = body["parts"]
+        assert parts[0]["type"] == "text"
+        assert "Attachment context:" in parts[0]["text"]
+        assert "Screenshot of the failure" in parts[0]["text"]
+        assert parts[1]["type"] == "file"
+        assert parts[1]["filename"] == "error.png"
+        assert parts[1]["url"] == attachment_path.resolve().as_uri()
