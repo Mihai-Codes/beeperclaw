@@ -1,4 +1,4 @@
-"""Command handlers for codebeep."""
+"""Command handlers for beeperclaw."""
 
 from __future__ import annotations
 
@@ -8,9 +8,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from codebeep.bot import CodeBeepBot
+    from beeperclaw.bot import BeeperClawBot
 
-from codebeep.opencode_client import OpenCodeAPIError, OpenCodeRateLimitError, PromptAttachment
+from beeperclaw.opencode_client import OpenCodeAPIError, OpenCodeRateLimitError, PromptAttachment
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ class Command(ABC):
 
     @abstractmethod
     async def execute(
-        self, bot: CodeBeepBot, args: str, context: CommandContext
+        self, bot: BeeperClawBot, args: str, context: CommandContext
     ) -> CommandResult:
         """Execute the command.
 
@@ -84,7 +84,7 @@ class BuildCommand(Command):
     aliases = ["b", "do", "code"]
 
     async def execute(
-        self, bot: CodeBeepBot, args: str, context: CommandContext
+        self, bot: BeeperClawBot, args: str, context: CommandContext
     ) -> CommandResult:
         if not args.strip():
             return CommandResult(
@@ -159,7 +159,7 @@ class PlanCommand(Command):
     aliases = ["p", "analyze", "review"]
 
     async def execute(
-        self, bot: CodeBeepBot, args: str, context: CommandContext
+        self, bot: BeeperClawBot, args: str, context: CommandContext
     ) -> CommandResult:
         if not args.strip():
             return CommandResult(
@@ -234,7 +234,7 @@ class StatusCommand(Command):
     aliases = ["s", "st"]
 
     async def execute(
-        self, bot: CodeBeepBot, args: str, context: CommandContext
+        self, bot: BeeperClawBot, args: str, context: CommandContext
     ) -> CommandResult:
         try:
             session_id = args.strip() if args.strip() else bot.get_room_session_id(context.room_id)
@@ -283,7 +283,7 @@ class SessionsCommand(Command):
     aliases = ["ls", "list"]
 
     async def execute(
-        self, bot: CodeBeepBot, args: str, context: CommandContext
+        self, bot: BeeperClawBot, args: str, context: CommandContext
     ) -> CommandResult:
         try:
             sessions = await bot.opencode.list_sessions()
@@ -329,7 +329,7 @@ class AbortCommand(Command):
     aliases = ["stop", "cancel"]
 
     async def execute(
-        self, bot: CodeBeepBot, args: str, context: CommandContext
+        self, bot: BeeperClawBot, args: str, context: CommandContext
     ) -> CommandResult:
         try:
             session_id = args.strip() if args.strip() else bot.get_room_session_id(context.room_id)
@@ -378,7 +378,7 @@ class ModelCommand(Command):
     aliases = ["m"]
 
     async def execute(
-        self, bot: CodeBeepBot, args: str, context: CommandContext
+        self, bot: BeeperClawBot, args: str, context: CommandContext
     ) -> CommandResult:
         if not args.strip():
             # List available models
@@ -412,7 +412,7 @@ class SSHCommand(Command):
     aliases = ["mosh"]
 
     async def execute(
-        self, bot: CodeBeepBot, args: str, context: CommandContext
+        self, bot: BeeperClawBot, args: str, context: CommandContext
     ) -> CommandResult:
         del args, context
 
@@ -456,7 +456,7 @@ class HelpCommand(Command):
     aliases = ["h", "?"]
 
     async def execute(
-        self, bot: CodeBeepBot, args: str, context: CommandContext
+        self, bot: BeeperClawBot, args: str, context: CommandContext
     ) -> CommandResult:
         if args.strip():
             # Help for specific command
@@ -482,7 +482,7 @@ class HelpCommand(Command):
             )
 
         # General help
-        lines = ["**codebeep Commands:**\n"]
+        lines = ["**beeperclaw Commands:**\n"]
         unique_cmds = {cmd.name: cmd for cmd in bot.commands.values()}
         for name in sorted(unique_cmds):
             cmd = unique_cmds[name]
@@ -505,7 +505,7 @@ class AgentsCommand(Command):
     aliases = ["a"]
 
     async def execute(
-        self, bot: CodeBeepBot, args: str, context: CommandContext
+        self, bot: BeeperClawBot, args: str, context: CommandContext
     ) -> CommandResult:
         try:
             agents = await bot.opencode.list_agents()

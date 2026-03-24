@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-echo "Building CodeBeep Docker image..."
-docker build -t codebeep:latest .
+echo "Building BeeperClaw Docker image..."
+docker build -t beeperclaw:latest .
 
 echo "Testing Docker run..."
 docker run --rm \
@@ -10,6 +10,6 @@ docker run --rm \
   -e MATRIX_USERNAME=test \
   -e MATRIX_PASSWORD=test \
   -e OPENCODE_SERVER_URL=http://host.docker.internal:4096 \
-  codebeep:latest --help
+  beeperclaw:latest --help
 
 echo "Docker build successful!"

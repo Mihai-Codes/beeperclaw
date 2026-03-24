@@ -1,4 +1,4 @@
-"""Lightweight persistent state for the CodeBeep bot."""
+"""Lightweight persistent state for the BeeperClaw bot."""
 
 from __future__ import annotations
 

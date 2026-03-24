@@ -18,8 +18,8 @@ COPY src/ ./src/
 RUN pip install --no-cache-dir -e .
 
 # Create non-root user
-RUN useradd -m -u 1000 codebeep && chown -R codebeep:codebeep /app
-USER codebeep
+RUN useradd -m -u 1000 beeperclaw && chown -R beeperclaw:beeperclaw /app
+USER beeperclaw
 
 # Copy configuration
 COPY config.example.yaml config.yaml
@@ -36,5 +36,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import sys; sys.exit(0)"
 
 # Entrypoint
-ENTRYPOINT ["codebeep"]
+ENTRYPOINT ["beeperclaw"]
 CMD ["run"]

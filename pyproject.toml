@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "codebeep"
+name = "beeperclaw"
 version = "0.1.0"
 description = "AI coding agent accessible from anywhere via Beeper/Matrix"
 readme = "README.md"
@@ -62,16 +62,16 @@ github = [
 ]
 
 [project.scripts]
-codebeep = "codebeep.cli:main"
+beeperclaw = "beeperclaw.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/your-username/codebeep"
-Documentation = "https://github.com/your-username/codebeep#readme"
-Repository = "https://github.com/your-username/codebeep"
-Issues = "https://github.com/your-username/codebeep/issues"
+Homepage = "https://github.com/your-username/beeperclaw"
+Documentation = "https://github.com/your-username/beeperclaw#readme"
+Repository = "https://github.com/your-username/beeperclaw"
+Issues = "https://github.com/your-username/beeperclaw/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/codebeep"]
+packages = ["src/beeperclaw"]
 
 [tool.black]
 line-length = 100

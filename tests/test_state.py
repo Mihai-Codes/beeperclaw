@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from codebeep.state import BotState, StateStore
+from beeperclaw.state import BotState, StateStore
 
 
 def test_state_store_round_trip(tmp_path) -> None:

@@ -1,4 +1,4 @@
-"""Command-line interface for codebeep."""
+"""Command-line interface for beeperclaw."""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ import click
 from rich.console import Console
 from rich.logging import RichHandler
 
-from codebeep import __version__
-from codebeep.config import Config
+from beeperclaw import __version__
+from beeperclaw.config import Config
 
 console = Console()
 
@@ -49,7 +49,7 @@ def setup_logging(level: str, log_file: str | None = None) -> None:
 @click.group()
 @click.version_option(version=__version__)
 def main() -> None:
-    """codebeep - AI coding agent accessible from anywhere via Beeper/Matrix."""
+    """beeperclaw - AI coding agent accessible from anywhere via Beeper/Matrix."""
     pass
 
 
@@ -67,7 +67,7 @@ def main() -> None:
     help="Run in daemon mode (background)",
 )
 def run(config: Path | None, daemon: bool) -> None:
-    """Start the codebeep bot."""
+    """Start the beeperclaw bot."""
     try:
         cfg = Config.load(config)
     except FileNotFoundError as e:
@@ -85,11 +85,11 @@ def run(config: Path | None, daemon: bool) -> None:
         console.print("[yellow]Daemon mode not yet implemented.[/yellow]")
         console.print("Running in foreground instead...")
 
-    console.print(f"[green]Starting codebeep v{__version__}[/green]")
+    console.print(f"[green]Starting beeperclaw v{__version__}[/green]")
     console.print(f"Connecting to: {cfg.matrix.homeserver}")
     console.print(f"OpenCode server: {cfg.opencode.server_url}")
 
-    from codebeep.bot import run_bot
+    from beeperclaw.bot import run_bot
 
     try:
         asyncio.run(run_bot(cfg))
@@ -123,7 +123,7 @@ def init(output: Path) -> None:
         console.print(f"[green]Created config file:[/green] {output}")
     else:
         # Create minimal config
-        minimal_config = """# codebeep Configuration
+        minimal_config = """# beeperclaw Configuration
 matrix:
   homeserver: "https://matrix.beeper.com"
   username: "@your-bot:beeper.local"
@@ -145,7 +145,7 @@ providers:
         console.print(f"[green]Created config file:[/green] {output}")
 
     console.print("\nEdit the config file with your credentials, then run:")
-    console.print("  codebeep run")
+    console.print("  beeperclaw run")
 
 
 @main.command()
@@ -168,7 +168,7 @@ def check(config: Path | None) -> None:
     console.print(f"\nChecking OpenCode server at {cfg.opencode.server_url}...")
 
     async def check_opencode() -> None:
-        from codebeep.opencode_client import OpenCodeClient
+        from beeperclaw.opencode_client import OpenCodeClient
 
         client = OpenCodeClient(cfg.opencode.server_url)
         try:
@@ -213,7 +213,7 @@ def check(config: Path | None) -> None:
 @main.command()
 def version() -> None:
     """Show version information."""
-    console.print(f"codebeep v{__version__}")
+    console.print(f"beeperclaw v{__version__}")
 
 
 if __name__ == "__main__":

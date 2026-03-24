@@ -1,4 +1,4 @@
-"""Main bot implementation for codebeep."""
+"""Main bot implementation for beeperclaw."""
 
 from __future__ import annotations
 
@@ -45,10 +45,10 @@ from nio.responses import (  # type: ignore[import-untyped]
     RoomResolveAliasResponse,
 )
 
-from codebeep.commands import ALL_COMMANDS, Command, CommandContext, CommandResult
-from codebeep.config import Config
-from codebeep.opencode_client import OpenCodeClient, PromptAttachment, Session
-from codebeep.state import BotState, StateStore
+from beeperclaw.commands import ALL_COMMANDS, Command, CommandContext, CommandResult
+from beeperclaw.config import Config
+from beeperclaw.opencode_client import OpenCodeClient, PromptAttachment, Session
+from beeperclaw.state import BotState, StateStore
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,7 @@ class PendingRun:
     attachments: tuple[PromptAttachment, ...] = ()
 
 
-class CodeBeepBot:
+class BeeperClawBot:
     """Matrix bot that integrates with OpenCode for mobile coding tasks."""
 
     def __init__(self, config: Config) -> None:
@@ -370,7 +370,7 @@ class CodeBeepBot:
         if session is not None:
             return session
 
-        session = await self.opencode.create_session(title="codebeep mobile session")
+        session = await self.opencode.create_session(title="beeperclaw mobile session")
         self._set_room_session(room_id, session)
         return session
 
@@ -789,7 +789,7 @@ class CodeBeepBot:
 
     async def _bootstrap_shell_room(self) -> None:
         domain = self._get_user_domain()
-        alias = f"#codebeep-shell:{domain}"
+        alias = f"#beeperclaw-shell:{domain}"
         now = time.time()
         if self._last_bootstrap_attempt and now - self._last_bootstrap_attempt < 300:
             logger.info("Skipping shell room bootstrap due to recent attempt")
@@ -816,12 +816,12 @@ class CodeBeepBot:
             self._save_state()
             return
 
-        logger.info("Bootstrapping: Creating CodeBeep Shell room...")
+        logger.info("Bootstrapping: Creating BeeperClaw Shell room...")
         response = await self._retry_matrix_call(
             "Room create",
             self.bot.api.async_client.room_create,
-            name="CodeBeep Shell",
-            topic="Unencrypted command shell for CodeBeep",
+            name="BeeperClaw Shell",
+            topic="Unencrypted command shell for BeeperClaw",
             preset=RoomPreset.private_chat,
         )
 
@@ -1042,7 +1042,7 @@ class CodeBeepBot:
 
     async def start(self) -> None:
         """Start the bot."""
-        logger.info("Starting codebeep bot...")
+        logger.info("Starting beeperclaw bot...")
 
         # Verify OpenCode connection
         try:
@@ -1123,7 +1123,7 @@ class CodeBeepBot:
 
     async def stop(self) -> None:
         """Stop the bot."""
-        logger.info("Stopping codebeep bot...")
+        logger.info("Stopping beeperclaw bot...")
 
         if self._event_task:
             self._event_task.cancel()
@@ -1142,7 +1142,7 @@ async def run_bot(config: Config) -> None:
     Args:
         config: Bot configuration
     """
-    bot = CodeBeepBot(config)
+    bot = BeeperClawBot(config)
     try:
         await bot.start()
     except KeyboardInterrupt:

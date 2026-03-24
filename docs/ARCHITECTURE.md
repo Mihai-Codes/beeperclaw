@@ -1,8 +1,8 @@
-# codebeep Architecture
+# beeperclaw Architecture
 
 ## Overview
 
-codebeep is a Matrix bot that bridges mobile messaging (via Beeper) to the OpenCode coding agent. This allows developers to assign coding tasks from their phone and have them executed on their development machine.
+beeperclaw is a Matrix bot that bridges mobile messaging (via Beeper) to the OpenCode coding agent. This allows developers to assign coding tasks from their phone and have them executed on their development machine.
 
 ## System Architecture
 
@@ -32,7 +32,7 @@ codebeep is a Matrix bot that bridges mobile messaging (via Beeper) to the OpenC
 │                      DEVELOPMENT MACHINE (Mac)                           │
 │                                                                          │
 │  ┌───────────────────────────────────────────────────────────────────┐  │
-│  │                     codebeep Bot (Python)                          │  │
+│  │                     beeperclaw Bot (Python)                          │  │
 │  │                                                                    │  │
 │  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐   │  │
 │  │  │   Matrix    │  │   Command   │  │    OpenCode Client      │   │  │
@@ -128,14 +128,14 @@ Monitors OpenCode events for task completion:
 
 ```
 1. User sends "/build fix auth bug" via Beeper
-2. Message arrives at codebeep via Matrix
+2. Message arrives at beeperclaw via Matrix
 3. Command handler parses the command
 4. Session manager gets/creates OpenCode session
 5. OpenCode client sends message to server
 6. OpenCode server processes with build agent
-7. codebeep sends "Task started" response
+7. beeperclaw sends "Task started" response
 8. Event monitor watches for completion
-9. On completion, codebeep notifies user
+9. On completion, beeperclaw notifies user
 ```
 
 ### Checking Status

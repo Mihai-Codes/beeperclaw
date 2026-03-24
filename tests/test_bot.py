@@ -10,11 +10,11 @@ from unittest.mock import AsyncMock
 import pytest
 from nio.responses import DiskDownloadResponse, DownloadError
 
-import codebeep.bot as bot_module
-from codebeep.bot import CodeBeepBot
-from codebeep.commands import AbortCommand, BuildCommand, CommandContext, PlanCommand, StatusCommand
-from codebeep.config import Config
-from codebeep.opencode_client import Session, SessionStatus
+import beeperclaw.bot as bot_module
+from beeperclaw.bot import BeeperClawBot
+from beeperclaw.commands import AbortCommand, BuildCommand, CommandContext, PlanCommand, StatusCommand
+from beeperclaw.config import Config
+from beeperclaw.opencode_client import Session, SessionStatus
 
 
 @dataclass
@@ -76,7 +76,7 @@ def _make_config(tmp_path) -> Config:
         {
             "matrix": {
                 "homeserver": "https://matrix.example.org",
-                "username": "@codebeep:test",
+                "username": "@beeperclaw:test",
                 "access_token": "token",
                 "allowed_users": ["@mihai:matrix.org"],
             },
@@ -90,11 +90,11 @@ def _make_config(tmp_path) -> Config:
 def bot_factory(monkeypatch, tmp_path):
     monkeypatch.setattr(bot_module.botlib, "Bot", _DummyMatrixBot)
 
-    def factory(state_path=None) -> CodeBeepBot:
+    def factory(state_path=None) -> BeeperClawBot:
         cfg = _make_config(tmp_path)
         if state_path is not None:
             cfg.bot.state_path = str(state_path)
-        return CodeBeepBot(cfg)
+        return BeeperClawBot(cfg)
 
     return factory
 
@@ -109,7 +109,7 @@ def _session(session_id: str) -> Session:
     )
 
 
-def _assistant_event(bot: CodeBeepBot, *, session_id: str = "sess-1", message_id: str = "msg-1"):
+def _assistant_event(bot: BeeperClawBot, *, session_id: str = "sess-1", message_id: str = "msg-1"):
     return bot.opencode.normalize_event(
         {
             "type": "session.message",

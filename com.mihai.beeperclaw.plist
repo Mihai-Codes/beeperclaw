@@ -3,23 +3,23 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.mihai.codebeep</string>
+    <string>com.mihai.beeperclaw</string>
     <key>ProgramArguments</key>
     <array>
         <!-- Update this path to your virtual environment python executable -->
-        <string>/Volumes/990Pro2TB/MyProjects/codebeep/venv/bin/codebeep</string>
+        <string>/Volumes/990Pro2TB/MyProjects/beeperclaw/venv/bin/beeperclaw</string>
         <string>run</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Volumes/990Pro2TB/MyProjects/codebeep</string>
+    <string>/Volumes/990Pro2TB/MyProjects/beeperclaw</string>
     <key>KeepAlive</key>
     <true/>
     <key>RunAtLoad</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/tmp/codebeep.log</string>
+    <string>/tmp/beeperclaw.log</string>
     <key>StandardErrorPath</key>
-    <string>/tmp/codebeep.error.log</string>
+    <string>/tmp/beeperclaw.error.log</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>

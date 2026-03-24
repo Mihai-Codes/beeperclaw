@@ -17,9 +17,9 @@ mosh --ssh="ssh -p 2222" mihai@100.64.0.42
 ### MagicDNS examples
 
 ```bash
-ssh mihai@codebeep.tailnet.example
-mosh mihai@codebeep.tailnet.example
-mosh --ssh="ssh -p 2222" mihai@codebeep.tailnet.example
+ssh mihai@beeperclaw.tailnet.example
+mosh mihai@beeperclaw.tailnet.example
+mosh --ssh="ssh -p 2222" mihai@beeperclaw.tailnet.example
 ```
 
 ### iPhone and iPad
@@ -69,7 +69,7 @@ mosh --ssh="ssh -p 2222" your-user@your-host
 Start a named session:
 
 ```bash
-tmux new -s codebeep
+tmux new -s beeperclaw
 ```
 
 Detach:
@@ -81,7 +81,7 @@ tmux detach
 Reattach later:
 
 ```bash
-tmux attach -t codebeep
+tmux attach -t beeperclaw
 ```
 
 ## Why this helps

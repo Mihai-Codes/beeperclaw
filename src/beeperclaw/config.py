@@ -1,4 +1,4 @@
-"""Configuration management for codebeep."""
+"""Configuration management for beeperclaw."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ class MatrixConfig(BaseModel):
     password: str | None = None
     access_token: str | None = None
     allowed_users: list[str] = Field(default_factory=list)
-    device_name: str = "codebeep"
+    device_name: str = "beeperclaw"
 
 
 class OpenCodeAuthConfig(BaseModel):
@@ -93,7 +93,7 @@ class BotConfig(BaseModel):
     max_message_length: int = 4000
     rate_limit: int = 30
     unknown_command_reply: bool = True
-    state_path: str = ".codebeep_store/state.json"
+    state_path: str = ".beeperclaw_store/state.json"
     dedup_enabled: bool = True
     dedup_cache_size: int = 500
     dedup_window_seconds: int = 10
@@ -118,7 +118,7 @@ class Config(BaseModel):
 
         Args:
             path: Path to the config file. If None, searches for config.yaml
-                  in the current directory and ~/.config/codebeep/
+                  in the current directory and ~/.config/beeperclaw/
 
         Returns:
             Loaded configuration
@@ -132,8 +132,8 @@ class Config(BaseModel):
             search_paths = [
                 Path("config.yaml"),
                 Path("config.yml"),
-                Path.home() / ".config" / "codebeep" / "config.yaml",
-                Path.home() / ".config" / "codebeep" / "config.yml",
+                Path.home() / ".config" / "beeperclaw" / "config.yaml",
+                Path.home() / ".config" / "beeperclaw" / "config.yml",
             ]
             for search_path in search_paths:
                 if search_path.exists():

@@ -1,1 +1,1 @@
-"""Tests for codebeep."""
+"""Tests for beeperclaw."""

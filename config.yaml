@@ -1,4 +1,4 @@
-# codebeep Configuration for Mihai's Setup
+# beeperclaw Configuration for Mihai's Setup
 # HTTPS via Tailscale Serve (optional; using local host by default)
 
 # Matrix connection settings
@@ -8,7 +8,7 @@ matrix:
   
   # Bot username (Matrix account)
   # Format: @username:matrix.org
-  username: "@codebeep_bot:matrix.org"
+  username: "@beeperclaw_bot:matrix.org"
   
   # Authentication (use ONE of these methods)
   # Option 1: Password (less secure)
@@ -28,7 +28,7 @@ matrix:
     - "@mihai-chindris:beeper.com"
   
   # Device name for the bot
-  device_name: "codebeep"
+  device_name: "beeperclaw"
 
 # OpenCode server settings
 opencode:
@@ -79,7 +79,7 @@ github:
   token: ""
   
   # Default repository (owner/repo format)
-  # default_repo: "Mihai-Codes/codebeep"
+  # default_repo: "Mihai-Codes/beeperclaw"
   
   # Auto-assign yourself to issues you work on
   auto_assign: true
@@ -90,7 +90,7 @@ logging:
   level: "INFO"
   
   # Log file path (optional)
-  # file: "/var/log/codebeep/codebeep.log"
+  # file: "/var/log/beeperclaw/beeperclaw.log"
   
   # Log to console
   console: true
@@ -113,7 +113,7 @@ bot:
   unknown_command_reply: true
 
   # Persisted bot state (session + dedup cache)
-  state_path: "/app/logs/.codebeep_store/state.json"
+  state_path: "/app/logs/.beeperclaw_store/state.json"
 
   # Deduplicate incoming events
   dedup_enabled: true

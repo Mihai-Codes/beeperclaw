@@ -1,16 +1,16 @@
-# codebeep
+# beeperclaw
 
 > Your AI coding agent, accessible from anywhere via Matrix/Beeper.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
 
-**codebeep** is a self-hosted AI coding agent that lets you assign coding tasks from your phone via [Beeper](https://beeper.com) (Matrix protocol). It integrates with [OpenCode](https://opencode.ai) to provide the same powerful coding capabilities you have on desktop, but accessible from anywhere.
+**beeperclaw** is a self-hosted AI coding agent that lets you assign coding tasks from your phone via [Beeper](https://beeper.com) (Matrix protocol). It integrates with [OpenCode](https://opencode.ai) to provide the same powerful coding capabilities you have on desktop, but accessible from anywhere.
 
 Inspired by [OpenClaw](https://github.com/openclaw/openclaw) - a personal AI assistant that runs on your own devices and answers on channels you already use.
 
-## Why codebeep?
+## Why beeperclaw?
 
-| Feature | Cursor Slack | Copilot Slack | codebeep |
+| Feature | Cursor Slack | Copilot Slack | beeperclaw |
 |---------|--------------|---------------|----------|
 | Self-hosted | No | No | **Yes** |
 | Open Source | No | No | **Yes** |
@@ -52,8 +52,8 @@ If you set `bot.connect_host`, the bot can also reply with the configured connec
 #### Method 1: Docker (Recommended)
 ```bash
 # Clone the repository
-git clone https://github.com/Mihai-Codes/codebeep.git
-cd codebeep
+git clone https://github.com/Mihai-Codes/beeperclaw.git
+cd beeperclaw
 
 # Build and run with Docker (solves python-olm compilation issues)
 docker-compose up -d
@@ -65,8 +65,8 @@ docker-compose logs -f
 #### Method 2: Native Python
 ```bash
 # Clone the repository
-git clone https://github.com/Mihai-Codes/codebeep.git
-cd codebeep
+git clone https://github.com/Mihai-Codes/beeperclaw.git
+cd beeperclaw
 
 # Create virtual environment and install
 python3 -m venv venv
@@ -97,14 +97,14 @@ This project includes a LaunchAgent to keep the bot running in the background.
 
 1. **Install the Service:**
    ```bash
-   cp com.mihai.codebeep.plist ~/Library/LaunchAgents/
-   launchctl load ~/Library/LaunchAgents/com.mihai.codebeep.plist
+   cp com.mihai.beeperclaw.plist ~/Library/LaunchAgents/
+   launchctl load ~/Library/LaunchAgents/com.mihai.beeperclaw.plist
    ```
 
 2. **Check Logs:**
    ```bash
-   tail -f /tmp/codebeep.log
-   tail -f /tmp/codebeep.error.log
+   tail -f /tmp/beeperclaw.log
+   tail -f /tmp/beeperclaw.error.log
    ```
 
 ## Configuration
@@ -143,7 +143,7 @@ curl -s https://matrix-client.matrix.org/_matrix/client/v3/login \
   -H "Content-Type: application/json" \
   -d '{
     "type":"m.login.password",
-    "user":"@codebeep-bot:matrix.org",
+    "user":"@beeperclaw-bot:matrix.org",
     "password":"YOUR_BOT_PASSWORD"
   }'
 ```
@@ -163,7 +163,7 @@ Phone (Beeper App)
         │
         │ Matrix Protocol (E2EE)
         ▼
-codebeep Bot (Docker)
+beeperclaw Bot (Docker)
         │
         ├──► OpenCode Server (:4096)
         │         │
@@ -173,7 +173,7 @@ codebeep Bot (Docker)
         │
         └──► Matrix Rooms
                   │
-                  └──► CodeBeep Shell (unencrypted)
+                  └──► BeeperClaw Shell (unencrypted)
                             │
                             └──► Command Interface
 ```

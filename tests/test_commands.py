@@ -4,14 +4,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from codebeep.commands import CommandContext, HelpCommand, SSHCommand
-from codebeep.config import Config
+from beeperclaw.commands import CommandContext, HelpCommand, SSHCommand
+from beeperclaw.config import Config
 
 
 def make_config(**bot_overrides: object) -> Config:
     """Build a minimal config for command tests."""
     payload = {
-        "matrix": {"username": "@codebeep-bot:matrix.org"},
+        "matrix": {"username": "@beeperclaw-bot:matrix.org"},
         "bot": bot_overrides,
     }
     return Config.model_validate(payload)
@@ -38,14 +38,14 @@ async def test_ssh_command_formats_default_commands() -> None:
     """The connect helper should return both SSH and mosh strings."""
     command = SSHCommand()
     bot = SimpleNamespace(
-        config=make_config(connect_host="codebeep.tailnet.example", connect_user="mihai")
+        config=make_config(connect_host="beeperclaw.tailnet.example", connect_user="mihai")
     )
 
     result = await command.execute(bot, "", TEST_CONTEXT)
 
     assert result.success is True
-    assert "`ssh mihai@codebeep.tailnet.example`" in result.message
-    assert "`mosh mihai@codebeep.tailnet.example`" in result.message
+    assert "`ssh mihai@beeperclaw.tailnet.example`" in result.message
+    assert "`mosh mihai@beeperclaw.tailnet.example`" in result.message
 
 
 @pytest.mark.asyncio

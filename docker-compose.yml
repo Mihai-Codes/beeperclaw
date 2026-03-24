@@ -1,9 +1,9 @@
 version: '3.8'
 
 services:
-  codebeep:
+  beeperclaw:
     build: .
-    container_name: codebeep
+    container_name: beeperclaw
     restart: unless-stopped
     command: ["run", "--config", "/app/config.yaml"]
     environment:

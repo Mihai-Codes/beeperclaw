@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-from codebeep.opencode_client import (
+from beeperclaw.opencode_client import (
     Message,
     OpenCodeClient,
     OpenCodeInvalidResponseError,
@@ -173,8 +173,8 @@ class TestOpenCodeClient:
         )
         client._get_client = AsyncMock(return_value=fake_client)  # type: ignore[attr-defined]
         sleep = AsyncMock()
-        monkeypatch.setattr("codebeep.opencode_client.asyncio.sleep", sleep)
-        monkeypatch.setattr("codebeep.opencode_client.random.uniform", lambda _a, _b: 0.0)
+        monkeypatch.setattr("beeperclaw.opencode_client.asyncio.sleep", sleep)
+        monkeypatch.setattr("beeperclaw.opencode_client.random.uniform", lambda _a, _b: 0.0)
 
         sessions = await client.list_sessions()
 

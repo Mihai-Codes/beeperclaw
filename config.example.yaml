@@ -1,4 +1,4 @@
-# codebeep Configuration
+# beeperclaw Configuration
 # Copy this file to config.yaml and fill in your values
 
 # Matrix/Beeper connection settings
@@ -8,7 +8,7 @@ matrix:
   
   # Bot username (create a new Beeper account for the bot)
   # Format: @username:beeper.local
-  username: "@codebeep-bot:beeper.local"
+  username: "@beeperclaw-bot:beeper.local"
   
   # Authentication (use ONE of these methods)
   # Option 1: Password
@@ -23,7 +23,7 @@ matrix:
     - "@your-main-account:beeper.local"
   
   # Device name for the bot
-  device_name: "codebeep"
+  device_name: "beeperclaw"
 
 # OpenCode server settings
 opencode:
@@ -89,7 +89,7 @@ logging:
   level: "INFO"
   
   # Log file path (optional)
-  # file: "/var/log/codebeep/codebeep.log"
+  # file: "/var/log/beeperclaw/beeperclaw.log"
   
   # Log to console
   console: true
@@ -118,7 +118,7 @@ bot:
   connect_ssh_port: 22
 
   # Persisted bot state (session + dedup cache)
-  state_path: "/app/logs/.codebeep_store/state.json"
+  state_path: "/app/logs/.beeperclaw_store/state.json"
 
   # Deduplicate incoming events
   dedup_enabled: true
