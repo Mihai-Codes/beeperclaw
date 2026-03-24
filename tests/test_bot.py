@@ -12,7 +12,13 @@ from nio.responses import DiskDownloadResponse, DownloadError
 
 import beeperclaw.bot as bot_module
 from beeperclaw.bot import BeeperClawBot
-from beeperclaw.commands import AbortCommand, BuildCommand, CommandContext, PlanCommand, StatusCommand
+from beeperclaw.commands import (
+    AbortCommand,
+    BuildCommand,
+    CommandContext,
+    PlanCommand,
+    StatusCommand,
+)
 from beeperclaw.config import Config
 from beeperclaw.opencode_client import Session, SessionStatus
 
